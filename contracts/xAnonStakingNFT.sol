@@ -122,6 +122,10 @@ contract xAnonStakingNFT is
     /// @dev tokenId => position data
     mapping(uint256 => IxAnonStakingNFT.PositionData) private _positions;
 
+    mapping(address => bool) public operators;
+
+    
+
     /// @notice Initialize contract with ANON token and descriptor
     /// @dev Creates three immutable pools with fixed allocations (20%/30%/50%)
     ///      Pool parameters cannot be changed after deployment
@@ -140,6 +144,13 @@ contract xAnonStakingNFT is
         _addPool(0, POOL0_ALLOC, POOL0_LOCK_DAYS); // Pool 0: Short (91 days, 20%)
         _addPool(1, POOL1_ALLOC, POOL1_LOCK_DAYS); // Pool 1: Medium (182 days, 30%)
         _addPool(2, POOL2_ALLOC, POOL2_LOCK_DAYS); // Pool 2: Long (365 days, 50%)
+    }
+
+    modifier onlyOperators() {
+        if (!operators[msg.sender] && msg.sender != owner()) {
+            revert NotAuthorized();
+        }
+        _;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -256,7 +267,7 @@ contract xAnonStakingNFT is
     ///
     /// @param amount Total ANON tokens to add as rewards (split 20/30/50 across pools)
     /// @return bool Always returns true on success
-    function topUp(uint256 amount) external nonReentrant returns (bool) {
+    function topUp(uint256 amount) external nonReentrant onlyOperators returns (bool) {
         if (amount < MIN_AMOUNT) revert AmountTooSmall();
 
         // Prevent topUp more frequently than once per 2 days
@@ -549,15 +560,10 @@ contract xAnonStakingNFT is
         return true;
     }
 
-    /// @notice Rescue accidentally sent ETH
-    /// @dev Transfers all contract ETH balance to owner
-    function rescueETH() external onlyOwner {
-        payable(msg.sender).transfer(address(this).balance);
+    function setOperator(address operator, bool enable) external onlyOwner {
+        operators[operator] = enable;
+        emit OperatorChanged(operator, enable);
     }
-
-    /// @notice Accept direct ETH transfers
-    /// @dev Contract can receive ETH (for gas refunds, etc.)
-    receive() external payable {}
 
     // ═══════════════════════════════════════════════════════════════
     //                       INTERNAL FUNCTIONS

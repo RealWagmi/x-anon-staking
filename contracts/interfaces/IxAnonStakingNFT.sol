@@ -35,6 +35,7 @@ interface IxAnonStakingNFT {
     );
     event TopUp(address indexed caller, uint256 indexed poolId, uint256 amount);
     event PoolAdded(uint256 indexed pid, uint16 allocPoint, uint256 lockDays);
+    event OperatorChanged(address indexed, bool);
 
     /// @notice Mint a position and stake tokens into a pool
     /// @param amount Staked amount
