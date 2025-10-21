@@ -144,20 +144,11 @@ describe("xAnonStakingNFT - stake-days weighting", function () {
       xanonS.connect(owner).topUp(ethers.parseEther("600"))
     ).to.be.revertedWithCustomError(xanonS, "TopUpTooFrequent");
 
-    // Same day - alice also can't topUp (any address blocked)
-    await expect(
-      xanonS.connect(alice).topUp(ethers.parseEther("600"))
-    ).to.be.revertedWithCustomError(xanonS, "TopUpTooFrequent");
-
     // Next day - still too frequent
     await increaseSeconds(DAY);
     await expect(
       xanonS.connect(owner).topUp(ethers.parseEther("600"))
     ).to.be.revertedWithCustomError(xanonS, "TopUpTooFrequent");
-
-    // After 2 days - anyone can topUp with valid amount
-    await increaseSeconds(DAY);
-    await xanonS.connect(alice).topUp(ethers.parseEther("600"));
   });
 
   it("no topUp for a long period yields zero rewards", async function () {
@@ -407,7 +398,7 @@ describe("xAnonStakingNFT - stake-days weighting", function () {
     await xanonS.connect(owner).mint(ethers.parseEther("100"), 0);
     // accrue some stake-days then create rewards
     await increaseSeconds(2 * DAY);
-    await xanonS.connect(alice).topUp(ethers.parseEther("1000"));
+    await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
     const tokenId = 1n;
     const before = await anon.balanceOf(alice.address);
     await increaseSeconds(91 * DAY);
@@ -538,25 +529,6 @@ describe("xAnonStakingNFT - stake-days weighting", function () {
     await xanonS.connect(alice).earnReward(alice.address, 1);
     const balAfter = await anon.balanceOf(alice.address);
     expect(balAfter - balBefore).to.equal(pending);
-  });
-
-  it("receives ETH and owner can rescueETH", async function () {
-    const { owner, xanonS } = await deployFixture();
-    // Send 1 ETH to contract
-    await owner.sendTransaction({
-      to: await xanonS.getAddress(),
-      value: ethers.parseEther("1"),
-    });
-    // Rescue all ETH to owner
-    const balBefore = await ethers.provider.getBalance(owner.address);
-    const tx = await xanonS.connect(owner).rescueETH();
-    const rcpt = await tx.wait();
-    const gas = rcpt!.gasUsed * (rcpt!.gasPrice ?? 0n);
-    const balAfter = await ethers.provider.getBalance(owner.address);
-    expect(balAfter + gas - balBefore).to.be.closeTo(
-      ethers.parseEther("1"),
-      ethers.parseEther("0.0001")
-    );
   });
 
   it("second earnReward in the same day reverts with No rewards", async function () {
@@ -1683,14 +1655,6 @@ describe("xAnonStakingNFT - stake-days weighting", function () {
       xanonS,
       "OwnableUnauthorizedAccount"
     );
-  });
-
-  it("rescueETH() reverts when called by non-owner", async function () {
-    const { alice, xanonS } = await deployFixture();
-
-    await expect(
-      xanonS.connect(alice).rescueETH()
-    ).to.be.revertedWithCustomError(xanonS, "OwnableUnauthorizedAccount");
   });
 
   it("rescueTokens() reverts when called by non-owner", async function () {

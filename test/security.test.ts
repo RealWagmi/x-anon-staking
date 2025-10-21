@@ -709,13 +709,13 @@ describe("Security Tests - Attack Vectors", function () {
   });
 
   describe("EDGE CASE: Zero and Boundary Values", function () {
-    it("should distribute pending rewards to first staker", async function () {
+    it("should distribute pending rewards to first staker (topUp same day)", async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
       // Day 0: topUp (1000) BEFORE any stakes
       //        → pool2 gets 500, goes to PENDING (intervalSD = 0)
-      // Day 0: Alice stakes 100
+      // Day 0: Alice stakes 100 (SAME day as topUp)
       // Day 1: 1 day pass (Alice accumulates 100 stake-days)
       // Day 1: earnReward triggers _finalizePendingRewards
       //        → Distributes pending 500 over 100 stake-days
@@ -749,6 +749,96 @@ describe("Security Tests - Attack Vectors", function () {
       await expect(
         xanonS.connect(alice).earnReward(alice.address, 1)
       ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+    });
+
+    it("CRITICAL: pending rewards distribute to user joining NEXT day", async function () {
+      const { owner, alice, bob, anon, xanonS } = await deployFixture();
+
+      // TIMELINE:
+      // Day 0: Pool is EMPTY (no stakers)
+      // Day 0: topUp (1000) → pool2 gets 500 → PENDING (no intervalSD)
+      // Day 1: Alice stakes 100, Bob stakes 100 (NEXT day after topUp)
+      // Day 2: Both claim
+      //
+      // EXPECTED:
+      // - Pending 500 distributes over stake-days accumulated after topUp
+      // - Alice: 100 stake-days (1 day × 100)
+      // - Bob:   100 stake-days (1 day × 100)
+      // - Each gets: 500 × 100/200 = 250
+      //
+      // CRITICAL: Pending rewards DON'T become dead weight!
+
+      // TopUp with EMPTY pool (no one staking)
+      const contractBalBefore = await anon.balanceOf(await xanonS.getAddress());
+      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      const contractBalAfterTopUp = await anon.balanceOf(
+        await xanonS.getAddress()
+      );
+
+      // Verify contract received the tokens
+      expect(contractBalAfterTopUp - contractBalBefore).to.equal(
+        ethers.parseEther("1000")
+      );
+
+      // Alice and Bob join NEXT day
+      await increaseSeconds(DAY);
+      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther("100"), 2);
+
+      // Wait another day for interval to form
+      await increaseSeconds(DAY);
+
+      // Check contract balance BEFORE claims (after mint)
+      const contractBalBeforeClaims = await anon.balanceOf(
+        await xanonS.getAddress()
+      );
+
+      // Both claim - should split pending 500
+      const aliceBalBefore = await anon.balanceOf(alice.address);
+      await xanonS.connect(alice).earnReward(alice.address, 1);
+      const aliceBalAfter = await anon.balanceOf(alice.address);
+      const aliceRewards = aliceBalAfter - aliceBalBefore;
+
+      const bobBalBefore = await anon.balanceOf(bob.address);
+      await xanonS.connect(bob).earnReward(bob.address, 2);
+      const bobBalAfter = await anon.balanceOf(bob.address);
+      const bobRewards = bobBalAfter - bobBalBefore;
+
+      // Each should get ~250 (50/50 split of pending 500)
+      expect(aliceRewards).to.be.closeTo(
+        ethers.parseEther("250"),
+        ethers.parseEther("5")
+      );
+      expect(bobRewards).to.be.closeTo(
+        ethers.parseEther("250"),
+        ethers.parseEther("5")
+      );
+
+      // Total should be close to 500 (all pending from pool2 distributed)
+      expect(aliceRewards + bobRewards).to.be.closeTo(
+        ethers.parseEther("500"),
+        ethers.parseEther("5")
+      );
+
+      // Verify rewards were actually paid out from contract
+      const contractBalAfterClaims = await anon.balanceOf(
+        await xanonS.getAddress()
+      );
+
+      // Contract paid out rewards (balance decreased)
+      const actualPaidOut = contractBalBeforeClaims - contractBalAfterClaims;
+      expect(actualPaidOut).to.be.closeTo(
+        ethers.parseEther("500"),
+        ethers.parseEther("5")
+      );
+
+      // Final check: Contract still holds pending from pool0 (200) + pool1 (300) = 500
+      // Plus principal from Alice (100) + Bob (100) = 200
+      // Total remaining: 700
+      expect(contractBalAfterClaims).to.be.closeTo(
+        ethers.parseEther("700"),
+        ethers.parseEther("10")
+      );
     });
 
     it("should handle minimum stake correctly", async function () {

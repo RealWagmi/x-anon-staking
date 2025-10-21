@@ -256,7 +256,9 @@ contract xAnonStakingNFT is
     ///
     /// @param amount Total ANON tokens to add as rewards (split 20/30/50 across pools)
     /// @return bool Always returns true on success
-    function topUp(uint256 amount) external nonReentrant returns (bool) {
+    function topUp(
+        uint256 amount
+    ) external nonReentrant onlyOwner returns (bool) {
         if (amount < MIN_AMOUNT) revert AmountTooSmall();
 
         // Prevent topUp more frequently than once per 2 days
@@ -548,16 +550,6 @@ contract xAnonStakingNFT is
         _safeErc20Transfer(token, to, amount);
         return true;
     }
-
-    /// @notice Rescue accidentally sent ETH
-    /// @dev Transfers all contract ETH balance to owner
-    function rescueETH() external onlyOwner {
-        payable(msg.sender).transfer(address(this).balance);
-    }
-
-    /// @notice Accept direct ETH transfers
-    /// @dev Contract can receive ETH (for gas refunds, etc.)
-    receive() external payable {}
 
     // ═══════════════════════════════════════════════════════════════
     //                       INTERNAL FUNCTIONS
