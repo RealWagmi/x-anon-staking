@@ -185,8 +185,7 @@ contract xAnonStakingNFT is
             amount: uint96(amount),
             poolId: uint8(pid),
             lockedUntil: uint64(lockTime),
-            lastPaidDay: uint64(_currentDay()),
-            accruedRewards: 0
+            lastPaidDay: uint64(_currentDay())
         });
 
         totalStaked += amount; // Track total principal
@@ -342,14 +341,13 @@ contract xAnonStakingNFT is
         if (pool.snapshots.length == 0) return 0;
         uint256 capDay = _getCapDay(position);
         uint256 startDay = position.lastPaidDay;
-        if (capDay <= startDay) return position.accruedRewards;
-        uint256 earnedDelta = _earnedDaysInterval(
+        if (capDay <= startDay) return 0;
+        return _earnedDaysInterval(
             pool,
             startDay,
             capDay,
             position.amount
         );
-        return position.accruedRewards + earnedDelta;
     }
 
     /// @notice Get pool configuration and current state
@@ -807,20 +805,16 @@ contract xAnonStakingNFT is
         uint256 capDay = _getCapDay(position);
         uint256 startDay = position.lastPaidDay;
         if (capDay <= startDay) return 0;
-        uint256 earnedDelta = _earnedDaysInterval(
+        payout = _earnedDaysInterval(
             pool,
             startDay,
             capDay,
             position.amount
         );
-        position.accruedRewards += earnedDelta;
         uint256 coveredDay = pool.snapshots[pool.snapshots.length - 1].day;
         position.lastPaidDay = uint64(
             capDay > coveredDay ? coveredDay : capDay
         );
-        payout = position.accruedRewards;
-        if (payout == 0) return 0;
-        position.accruedRewards = 0;
         return payout;
     }
 

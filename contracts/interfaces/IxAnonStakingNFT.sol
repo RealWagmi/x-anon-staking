@@ -6,13 +6,11 @@ interface IxAnonStakingNFT {
     /// @dev Storage/view struct for xAnonStakingNFT positions (stake-days model)
     /// @dev Storage packing: 2 slots instead of 5 (saves ~42K gas on mint, ~15K on burn)
     /// Slot 0: amount(12) + poolId(1) + lockedUntil(8) + lastPaidDay(8) + padding(3) = 32 bytes
-    /// Slot 1: accruedRewards(32) = 32 bytes
     struct PositionData {
         uint96 amount; // 12 bytes - max 79,228,162,514 tokens (79B with 18 decimals)
         uint8 poolId; // 1 byte  - max 255 pools (current max is 10)
         uint64 lockedUntil; // 8 bytes - timestamps until year 584,942,417,355
         uint64 lastPaidDay; // 8 bytes - day index until year 584,942,417,355
-        uint256 accruedRewards; // 32 bytes - no limit for accumulated rewards
     }
 
     event Mint(
