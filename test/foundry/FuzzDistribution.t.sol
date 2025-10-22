@@ -30,6 +30,33 @@ contract FuzzDistributionTest is Test {
         uint256 balanceAfter;
     }
 
+    // Helper: Get pool allocation from contract (not hardcoded!)
+    function getPoolAllocation(
+        uint8 poolId,
+        uint256 topUpAmount
+    ) internal view returns (uint256) {
+        (uint16 allocPoint, , , , ) = staking.poolInfo(poolId);
+
+        // Simulate contract's exact math
+        uint256 remaining = topUpAmount;
+        for (uint256 i = 0; i < 3; i++) {
+            (uint16 alloc, , , , ) = staking.poolInfo(i);
+            uint256 part = (topUpAmount * alloc) / 10000;
+
+            if (i == 2) part = remaining; // Last pool gets remaining
+            if (i < 2) remaining -= part;
+
+            if (i == poolId) return part;
+        }
+        return 0;
+    }
+
+    // Helper: Get lock days from contract (not hardcoded!)
+    function getLockDays(uint8 poolId) internal view returns (uint256) {
+        (, uint256 lockDays, , , ) = staking.poolInfo(poolId);
+        return lockDays;
+    }
+
     function setUp() public {
         owner = address(this);
         alice = makeAddr("alice");
@@ -114,8 +141,15 @@ contract FuzzDistributionTest is Test {
         // Bound inputs - use uint8 for simpler bounds
         amount = uint96(bound(amount, MIN_AMOUNT, 10_000 ether));
         poolId = uint8(bound(poolId, 0, 2));
-        aliceStakeDays = uint8(bound(aliceStakeDays, 10, 50));
-        bobStakeDays = uint8(bound(bobStakeDays, 5, aliceStakeDays - 2));
+
+        // Adapt to actual pool lock days (no hardcoding!)
+        uint256 lockDays = getLockDays(poolId);
+        uint8 maxStakeDays = uint8(lockDays < 50 ? lockDays : 50);
+
+        aliceStakeDays = uint8(bound(aliceStakeDays, 2, maxStakeDays));
+        bobStakeDays = uint8(
+            bound(bobStakeDays, 1, aliceStakeDays > 1 ? aliceStakeDays - 1 : 1)
+        );
 
         // Alice stakes first
         vm.prank(alice);
@@ -330,22 +364,10 @@ contract FuzzDistributionTest is Test {
         vm.prank(bob);
         uint256 bobRewards = staking.earnReward(bob, tokenId2);
 
-        // Calculate EXACT pool allocation by simulating EACH topUp separately
-        // (rounding happens per topUp, not on total!)
+        // Calculate EXACT pool allocation from contract
         uint256 poolAlloc = 0;
-
         for (uint256 t = 0; t < numTopUps; t++) {
-            uint256 remaining = topUpAmount;
-
-            for (uint256 i = 0; i < 3; i++) {
-                uint256 part;
-                if (i == 0) part = (topUpAmount * 2000) / 10000;
-                else if (i == 1) part = (topUpAmount * 3000) / 10000;
-                else part = remaining; // Pool 2 gets remaining (includes rounding)
-
-                if (i < 2) remaining -= part;
-                if (i == poolId) poolAlloc += part;
-            }
+            poolAlloc += getPoolAllocation(poolId, topUpAmount);
         }
 
         // CRITICAL INVARIANT: Total NEVER exceeds pool allocation
@@ -408,15 +430,9 @@ contract FuzzDistributionTest is Test {
         assertGt(r1, 0, "Alice should earn");
         assertGt(r2, 0, "Bob should earn");
 
-        // INVARIANT 3: Total should not exceed 10× pool allocation
-        // (Since we have up to aliceDays+2 days of accumulation, multiple intervals possible)
-        uint256 maxPossible;
-        if (poolId == 0)
-            maxPossible = 2000 ether; // 20% × 10_000 topUp
-        else if (poolId == 1) maxPossible = 3000 ether;
-        else maxPossible = 5000 ether;
-
-        assertLe(r1 + r2, maxPossible, "Total reasonable");
+        // INVARIANT 3: Total should not exceed pool allocation
+        uint256 poolAlloc = getPoolAllocation(poolId, 10_000 ether);
+        assertLe(r1 + r2, poolAlloc, "Total <= allocation");
 
         // Note: Complex scenario with gaps and intermediate snapshots
         // We test STRICT ordering and reasonable bounds, not exact math
@@ -534,6 +550,10 @@ contract FuzzDistributionTest is Test {
         poolId = uint8(bound(poolId, 0, 2));
         numClaims = uint8(bound(numClaims, 2, 5));
 
+        // Adapt gap to pool's lock period
+        uint256 lockDays = getLockDays(poolId);
+        uint256 gapDays = lockDays / numClaims > 3 ? 3 : 2; // Adaptive gap
+
         // Alice stakes
         vm.prank(alice);
         uint256 tokenId = staking.mint(stakeAmount, poolId);
@@ -543,7 +563,7 @@ contract FuzzDistributionTest is Test {
 
         // Multiple topUp-claim cycles
         for (uint256 i = 0; i < numClaims; i++) {
-            skip(3 * DAY);
+            skip(gapDays * DAY);
             staking.topUp(1000 ether);
             totalTopUp += 1000 ether;
             skip(DAY);
@@ -768,16 +788,7 @@ contract FuzzDistributionTest is Test {
 
         // Verification phase
         {
-            uint256 poolAlloc;
-            if (poolId == 0) poolAlloc = (topUpAmount * 2000) / 10000;
-            else if (poolId == 1) poolAlloc = (topUpAmount * 3000) / 10000;
-            else
-                poolAlloc =
-                    topUpAmount -
-                    (topUpAmount * 2000) /
-                    10000 -
-                    (topUpAmount * 3000) /
-                    10000;
+            uint256 poolAlloc = getPoolAllocation(poolId, topUpAmount);
 
             // INVARIANT 1: Total rewards <= allocation
             assertLe(
@@ -795,7 +806,7 @@ contract FuzzDistributionTest is Test {
 
         // Burn phase
         {
-            uint256 lockDays = poolId == 0 ? 91 : (poolId == 1 ? 182 : 365);
+            uint256 lockDays = getLockDays(poolId);
             skip(lockDays * DAY);
 
             uint256 totalBefore = staking.totalStaked();
@@ -860,20 +871,8 @@ contract FuzzDistributionTest is Test {
             for (uint256 i = 0; i < numTopUps; i++) {
                 staking.topUp(5_000 ether);
 
-                // Calculate allocation
-                uint256 remaining = 5_000 ether;
-                uint256 part;
-                if (poolId == 0) part = (5_000 ether * 2000) / 10000;
-                else if (poolId == 1) part = (5_000 ether * 3000) / 10000;
-                else
-                    part =
-                        remaining -
-                        (5_000 ether * 2000) /
-                        10000 -
-                        (5_000 ether * 3000) /
-                        10000;
-
-                totalAllocated += part;
+                // Get allocation from contract
+                totalAllocated += getPoolAllocation(poolId, 5_000 ether);
                 skip(2 * DAY);
             }
             skip(DAY);
@@ -986,8 +985,7 @@ contract FuzzDistributionTest is Test {
         }
 
         // Wait for unlock
-        uint256 lockDays = poolId == 0 ? 91 : (poolId == 1 ? 182 : 365);
-        skip(lockDays * DAY);
+        skip(getLockDays(poolId) * DAY);
 
         // Staggered exit based on exitOrder
         uint256 totalStake = a.stake + b.stake + c.stake;

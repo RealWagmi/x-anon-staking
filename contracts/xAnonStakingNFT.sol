@@ -59,7 +59,7 @@ contract xAnonStakingNFT is
 
     // Pool 0: Short (91 days, 20% allocation)
     uint16 private constant POOL0_ALLOC = 2000;
-    uint256 private constant POOL0_LOCK_DAYS = 91;
+    uint256 private constant POOL0_LOCK_DAYS = 91; //should be at least 3 days minimum
 
     // Pool 1: Medium (182 days, 30% allocation)
     uint16 private constant POOL1_ALLOC = 3000;

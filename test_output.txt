@@ -1,0 +1,5 @@
+
+> multi-pool-time-locked-staking@1.0.0 test
+> hardhat test --show-stack-traces --typecheck
+
+
