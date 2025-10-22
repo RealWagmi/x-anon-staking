@@ -174,8 +174,7 @@ contract xAnonStakingNFT is
             amount: uint96(amount),
             poolId: uint8(pid),
             lockedUntil: uint64(lockTime),
-            lastPaidDay: uint64(_currentDay()),
-            accruedRewards: 0
+            lastPaidDay: uint64(_currentDay())
         });
 
         totalStaked += amount; // Track total principal
@@ -333,14 +332,8 @@ contract xAnonStakingNFT is
         if (pool.snapshots.length == 0) return 0;
         uint256 capDay = _getCapDay(position);
         uint256 startDay = position.lastPaidDay;
-        if (capDay <= startDay) return position.accruedRewards;
-        uint256 earnedDelta = _earnedDaysInterval(
-            pool,
-            startDay,
-            capDay,
-            position.amount
-        );
-        return position.accruedRewards + earnedDelta;
+        if (capDay <= startDay) return 0;
+        return _earnedDaysInterval(pool, startDay, capDay, position.amount);
     }
 
     /// @notice Get pool configuration and current state
@@ -507,7 +500,6 @@ contract xAnonStakingNFT is
     ///      - poolId: pool index (0/1/2)
     ///      - lockedUntil: unlock timestamp
     ///      - lastPaidDay: last reward claim day
-    ///      - accruedRewards: pending unclaimed rewards
     ///
     /// @param tokenId Position NFT ID
     /// @return position Position data struct
@@ -781,7 +773,7 @@ contract xAnonStakingNFT is
 
     /// @dev Compute and collect rewards for a position up to min(nowDay, lockedUntilDay).
     ///      Requires that caller already called _updatePoolState.
-    ///      Updates lastPaidDay and zeroes accruedRewards upon successful collection.
+    ///      Updates lastPaidDay upon successful collection.
     /// @param pool Pool storage reference
     /// @param position Position storage reference
     /// @return payout Rewards to pay
@@ -793,20 +785,16 @@ contract xAnonStakingNFT is
         uint256 capDay = _getCapDay(position);
         uint256 startDay = position.lastPaidDay;
         if (capDay <= startDay) return 0;
-        uint256 earnedDelta = _earnedDaysInterval(
-            pool,
-            startDay,
-            capDay,
-            position.amount
-        );
-        position.accruedRewards += earnedDelta;
+
+        payout = _earnedDaysInterval(pool, startDay, capDay, position.amount);
+
+        if (payout == 0) return 0;
+
         uint256 coveredDay = pool.snapshots[pool.snapshots.length - 1].day;
         position.lastPaidDay = uint64(
             capDay > coveredDay ? coveredDay : capDay
         );
-        payout = position.accruedRewards;
-        if (payout == 0) return 0;
-        position.accruedRewards = 0;
+
         return payout;
     }
 

@@ -1556,7 +1556,6 @@ describe("Security Tests - Attack Vectors", function () {
 
       // Verify position state after claim
       const pos = await xanonS.positionOf(1);
-      expect(pos.accruedRewards).to.equal(0n); // Rewards paid out
 
       // lastPaidDay should be >= mintDay (advanced from mint day)
       expect(Number(pos.lastPaidDay)).to.be.gte(mintDay);

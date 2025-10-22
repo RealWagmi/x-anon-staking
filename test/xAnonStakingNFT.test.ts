@@ -453,7 +453,6 @@ describe("xAnonStakingNFT - stake-days weighting", function () {
     expect(pos.poolId).to.equal(1n);
     expect(pos.lockedUntil).to.be.gt(0n);
     expect(pos.lastPaidDay).to.be.gte(0n);
-    expect(pos.accruedRewards).to.equal(0n);
   });
 
   // REMOVED: Test for set() function (pools are now fixed)
