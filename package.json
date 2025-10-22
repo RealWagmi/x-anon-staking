@@ -5,6 +5,8 @@
   "scripts": {
     "compile": "hardhat clean && hardhat compile",
     "test": "hardhat test --show-stack-traces --typecheck",
+    "test:fuzz": "forge test --match-path test/foundry/FuzzDistribution.t.sol -vv",
+    "test:fuzz:deep": "forge test --match-path test/foundry/FuzzDistribution.t.sol --fuzz-runs 10000 -vv",
     "coverage": "hardhat coverage",
     "deploy": "npx hardhat run ./scripts/deploy.ts --network $npm_config_network"
   },

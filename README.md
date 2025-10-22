@@ -11,6 +11,32 @@ npm test
 npm run coverage
 ```
 
+## Fuzz Testing
+
+Advanced property-based testing with Foundry:
+
+```bash
+# Install Foundry (if not installed)
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+
+# Install forge-std dependency
+forge install foundry-rs/forge-std --no-commit
+
+# Run fuzz tests (1000+ random inputs per test)
+forge test --match-path test/foundry/FuzzDistribution.t.sol -vv
+
+# Run with more iterations for deeper testing
+forge test --match-path test/foundry/FuzzDistribution.t.sol --fuzz-runs 10000 -vv
+
+# Run specific fuzz test
+forge test --match-test testFuzz_EqualStakesEqualRewards -vvv
+
+# OR
+npm run test:fuzz
+npm run test:fuzz:deep
+```
+
 ## Deployment
 
 ```bash
