@@ -2,6 +2,16 @@
 
 Stake-days weighted NFT staking system with time-locked pools and proportional reward distribution.
 
+## Key Features
+
+- **Three Fixed Pools**: 91/182/365 days lock periods with 20%/30%/50% base allocations
+- **Empty Pool Redistribution**: Rewards from empty pools automatically redistributed to active pools
+  - Example: If only pool 2 is active, it receives 100% of rewards (not 50%)
+- **Time-Weighted Rewards**: Fair distribution based on stake-days (amount × days staked)
+- **Per-Pool TopUp Control**: Independent 2-day minimum gap per pool (not global)
+- **Principal Protection**: Contract balance always ≥ total staked (prevents reward calculation bugs from affecting deposits)
+- **Ring Buffer Expiration**: O(1) gas-efficient position expiration tracking
+
 ## Quick Start
 
 ```bash
@@ -80,9 +90,32 @@ xAnonStaking.burn(yourAddress, tokenId);
 ### Add Rewards (Protocol/Owner)
 
 ```solidity
-// TopUp rewards to be distributed across all pools
+// TopUp rewards - distributed ONLY to active pools (with stake-days > 0)
+// Empty pools are skipped, their allocations redistributed to active pools
 xAnonStaking.topUp(rewardAmount);
 ```
+
+**Empty Pool Redistribution Example:**
+
+```
+Scenario: topUp(10,000 ANON)
+
+Case 1: All pools active
+- Pool 0 (20%): 2,000 ANON
+- Pool 1 (30%): 3,000 ANON
+- Pool 2 (50%): 5,000 ANON
+
+Case 2: Only pool 2 active (pools 0 and 1 empty)
+- Pool 0: 0 ANON (empty, skipped)
+- Pool 1: 0 ANON (empty, skipped)
+- Pool 2: 10,000 ANON (100% redistribution!)
+```
+
+**Key Points:**
+
+- Minimum 2-day gap between topUps per pool (independent per pool)
+- At least one pool must have active stakes (reverts otherwise)
+- Rewards distributed proportionally by allocPoints among active pools only
 
 ## 📊 APR Calculation
 
@@ -184,6 +217,13 @@ For stake-days weighted model:
 - Total active stake (dilution effect)
 - Entry timing within reward intervals
 - Early stakers earn more stake-days
+- **Empty pool redistribution**: If other pools are empty, your pool gets larger share
+
+💡 **Empty Pool Redistribution Impact on APR:**
+
+The `getPoolAPR()` function automatically accounts for empty pool redistribution because it reads actual `perDayRate` from snapshots. These snapshots already reflect the redistributed amounts.
+
+Example: If pool 2 received 100% of a topUp (due to pools 0 and 1 being empty), the snapshot's `perDayRate` will be calculated from that full amount, resulting in higher projected APR.
 
 ✅ **Confidence Score** indicates data quality:
 

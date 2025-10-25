@@ -30,23 +30,57 @@ contract FuzzDistributionTest is Test {
         uint256 balanceAfter;
     }
 
-    // Helper: Get pool allocation from contract (not hardcoded!)
+    // Helper: Get pool allocation from contract with EMPTY POOL REDISTRIBUTION
+    // IMPORTANT: This function simulates the contract's empty pool redistribution logic!
+    // If only some pools are active, their allocations are redistributed proportionally.
+    //
+    // @param poolId The pool to get allocation for
+    // @param topUpAmount Total topUp amount
+    // @param activePoolIds Array of active pool IDs (pools with stake-days > 0)
+    // @return The amount allocated to poolId after redistribution
     function getPoolAllocation(
         uint8 poolId,
-        uint256 topUpAmount
+        uint256 topUpAmount,
+        uint8[] memory activePoolIds
     ) internal view returns (uint256) {
+        // Edge case: no active pools
+        if (activePoolIds.length == 0) return 0;
+
+        // If pool is not in activePoolIds, it gets 0
+        bool isActive = false;
+        for (uint256 i = 0; i < activePoolIds.length; i++) {
+            if (activePoolIds[i] == poolId) {
+                isActive = true;
+                break;
+            }
+        }
+        if (!isActive) return 0;
+
+        // Calculate total allocation points of active pools
+        uint256 totalActiveAllocPoint = 0;
+        for (uint256 i = 0; i < activePoolIds.length; i++) {
+            (uint16 alloc, , , , ) = staking.poolInfo(activePoolIds[i]);
+            totalActiveAllocPoint += alloc;
+        }
+
+        // Edge case: all active pools have 0 allocPoint (shouldn't happen in practice)
+        if (totalActiveAllocPoint == 0) return 0;
+
+        // Get this pool's allocation point
         (uint16 allocPoint, , , , ) = staking.poolInfo(poolId);
 
-        // Simulate contract's exact math
+        // Calculate proportional share: (topUpAmount * allocPoint / totalActiveAllocPoint)
+        // This simulates contract's exact redistribution logic
         uint256 remaining = topUpAmount;
-        for (uint256 i = 0; i < 3; i++) {
-            (uint16 alloc, , , , ) = staking.poolInfo(i);
-            uint256 part = (topUpAmount * alloc) / 10000;
+        for (uint256 i = 0; i < activePoolIds.length; i++) {
+            (uint16 alloc, , , , ) = staking.poolInfo(activePoolIds[i]);
+            uint256 part = (topUpAmount * alloc) / totalActiveAllocPoint;
 
-            if (i == 2) part = remaining; // Last pool gets remaining
-            if (i < 2) remaining -= part;
+            // Last active pool gets remaining (handles rounding)
+            if (i == activePoolIds.length - 1) part = remaining;
+            else remaining -= part;
 
-            if (i == poolId) return part;
+            if (activePoolIds[i] == poolId) return part;
         }
         return 0;
     }
@@ -62,6 +96,13 @@ contract FuzzDistributionTest is Test {
         alice = makeAddr("alice");
         bob = makeAddr("bob");
         carol = makeAddr("carol");
+
+        // CRITICAL: Warp to non-zero timestamp
+        // Contract's _currentDay() = block.timestamp / 1 days
+        // Foundry starts at timestamp = 1 → _currentDay() = 0
+        // This causes underflow in mint(): dayIdx = (_currentDay() - 1) % lockDays
+        // Solution: Set timestamp to 1 day or more
+        vm.warp(1 days);
 
         // Deploy contracts
         anon = new MockERC20("ANON", "ANON", 18);
@@ -231,11 +272,14 @@ contract FuzzDistributionTest is Test {
         staking.topUp(topUpAmount);
         skip(DAY);
 
-        // Calculate expected pool allocation
-        uint256 poolAllocation;
-        if (poolId == 0) poolAllocation = (topUpAmount * 20) / 100;
-        else if (poolId == 1) poolAllocation = (topUpAmount * 30) / 100;
-        else poolAllocation = (topUpAmount * 50) / 100;
+        // Calculate expected pool allocation (only this pool is active)
+        uint8[] memory activePoolIds = new uint8[](1);
+        activePoolIds[0] = poolId;
+        uint256 poolAllocation = getPoolAllocation(
+            poolId,
+            topUpAmount,
+            activePoolIds
+        );
 
         // Claim all
         vm.prank(alice);
@@ -364,10 +408,12 @@ contract FuzzDistributionTest is Test {
         vm.prank(bob);
         uint256 bobRewards = staking.earnReward(bob, tokenId2);
 
-        // Calculate EXACT pool allocation from contract
+        // Calculate EXACT pool allocation from contract (only this pool is active)
+        uint8[] memory activePoolIds = new uint8[](1);
+        activePoolIds[0] = poolId;
         uint256 poolAlloc = 0;
         for (uint256 t = 0; t < numTopUps; t++) {
-            poolAlloc += getPoolAllocation(poolId, topUpAmount);
+            poolAlloc += getPoolAllocation(poolId, topUpAmount, activePoolIds);
         }
 
         // CRITICAL INVARIANT: Total NEVER exceeds pool allocation
@@ -430,8 +476,14 @@ contract FuzzDistributionTest is Test {
         assertGt(r1, 0, "Alice should earn");
         assertGt(r2, 0, "Bob should earn");
 
-        // INVARIANT 3: Total should not exceed pool allocation
-        uint256 poolAlloc = getPoolAllocation(poolId, 10_000 ether);
+        // INVARIANT 3: Total should not exceed pool allocation (only this pool active)
+        uint8[] memory activePoolIds = new uint8[](1);
+        activePoolIds[0] = poolId;
+        uint256 poolAlloc = getPoolAllocation(
+            poolId,
+            10_000 ether,
+            activePoolIds
+        );
         assertLe(r1 + r2, poolAlloc, "Total <= allocation");
 
         // Note: Complex scenario with gaps and intermediate snapshots
@@ -487,7 +539,9 @@ contract FuzzDistributionTest is Test {
     //              FUZZ: POOL ALLOCATION RATIOS
     // ════════════════════════════════════════════════════════════════
 
-    /// @notice Pool allocations (20/30/50) must be maintained
+    /// @notice Pool allocations (20/30/50) must be maintained when ALL pools active
+    /// @dev This test verifies base allocation ratios WITHOUT empty pool redistribution
+    ///      because all 3 pools have active stakes simultaneously
     function testFuzz_PoolAllocationRatios(
         uint96 stakeAmount,
         uint16 daysBeforeTopUp,
@@ -501,6 +555,7 @@ contract FuzzDistributionTest is Test {
         );
 
         // Stake in all 3 pools (same amount, same time)
+        // This ensures ALL pools are active → no empty pool redistribution
         vm.prank(alice);
         uint256 t0 = staking.mint(stakeAmount, 0);
         vm.prank(bob);
@@ -508,7 +563,7 @@ contract FuzzDistributionTest is Test {
         vm.prank(carol);
         uint256 t2 = staking.mint(stakeAmount, 2);
 
-        // TopUp
+        // TopUp with all pools active
         skip(daysBeforeTopUp * DAY);
         staking.topUp(topUpAmount);
         skip(DAY);
@@ -521,7 +576,8 @@ contract FuzzDistributionTest is Test {
         vm.prank(carol);
         uint256 r2 = staking.earnReward(carol, t2);
 
-        // INVARIANT: Ratio should be 20:30:50 (2:3:5)
+        // INVARIANT: Ratio should be 20:30:50 (2:3:5) when all pools active
+        // No empty pool redistribution occurs here
         // Check r0:r1:r2 ≈ 2:3:5
         if (r0 > 0 && r1 > 0 && r2 > 0) {
             uint256 ratio01 = (r0 * 100) / r1; // Should be ~67 (2/3)
@@ -532,6 +588,189 @@ contract FuzzDistributionTest is Test {
             assertApproxEqRel(ratio01, 67, 0.05e18, "Pool0:Pool1 ratio");
             assertApproxEqRel(ratio12, 60, 0.05e18, "Pool1:Pool2 ratio");
             assertApproxEqRel(ratio02, 40, 0.05e18, "Pool0:Pool2 ratio");
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //         DETERMINISTIC: 3 USERS IN 3 ACTIVE POOLS
+    // ════════════════════════════════════════════════════════════════
+
+    /// @notice CRITICAL TEST: 3 users in 3 different pools, verify 20%/30%/50% split
+    /// @dev This is a deterministic (non-fuzz) test that explicitly verifies
+    ///      the base allocation when ALL 3 pools are active simultaneously
+    ///      NO empty pool redistribution should occur here
+    function test_ThreeUsersThreeActivePools_ExactAllocation() public {
+        // Fixed amounts for deterministic test
+        uint256 stakeAmount = 1000 ether;
+        uint256 topUpAmount = 10_000 ether;
+
+        // Alice stakes in pool 0 (Short, 91 days, 20% allocation)
+        vm.prank(alice);
+        uint256 tokenId0 = staking.mint(stakeAmount, 0);
+
+        // Bob stakes in pool 1 (Medium, 182 days, 30% allocation)
+        vm.prank(bob);
+        uint256 tokenId1 = staking.mint(stakeAmount, 1);
+
+        // Carol stakes in pool 2 (Long, 365 days, 50% allocation)
+        vm.prank(carol);
+        uint256 tokenId2 = staking.mint(stakeAmount, 2);
+
+        // Wait for stake-days to accumulate
+        skip(5 * DAY);
+
+        // TopUp with ALL 3 pools active
+        staking.topUp(topUpAmount);
+        skip(DAY);
+
+        // Calculate expected rewards (all 3 pools active → 20%/30%/50% split)
+        uint8[] memory activePoolIds = new uint8[](3);
+        activePoolIds[0] = 0;
+        activePoolIds[1] = 1;
+        activePoolIds[2] = 2;
+
+        uint256 expectedAlice = getPoolAllocation(
+            0,
+            topUpAmount,
+            activePoolIds
+        );
+        uint256 expectedBob = getPoolAllocation(1, topUpAmount, activePoolIds);
+        uint256 expectedCarol = getPoolAllocation(
+            2,
+            topUpAmount,
+            activePoolIds
+        );
+
+        // Claim rewards
+        vm.prank(alice);
+        uint256 aliceRewards = staking.earnReward(alice, tokenId0);
+        vm.prank(bob);
+        uint256 bobRewards = staking.earnReward(bob, tokenId1);
+        vm.prank(carol);
+        uint256 carolRewards = staking.earnReward(carol, tokenId2);
+
+        // CRITICAL ASSERTIONS: Verify exact 20%/30%/50% distribution
+        assertApproxEqRel(
+            aliceRewards,
+            expectedAlice,
+            0.01e18,
+            "Alice should get ~20%"
+        );
+        assertApproxEqRel(
+            bobRewards,
+            expectedBob,
+            0.01e18,
+            "Bob should get ~30%"
+        );
+        assertApproxEqRel(
+            carolRewards,
+            expectedCarol,
+            0.01e18,
+            "Carol should get ~50%"
+        );
+
+        // Verify total distributed equals topUp amount
+        uint256 totalDistributed = aliceRewards + bobRewards + carolRewards;
+        assertApproxEqRel(
+            totalDistributed,
+            topUpAmount,
+            0.01e18,
+            "Total should equal topUp amount"
+        );
+
+        // Verify ordering: Carol > Bob > Alice (50% > 30% > 20%)
+        assertGt(carolRewards, bobRewards, "Carol (50%) > Bob (30%)");
+        assertGt(bobRewards, aliceRewards, "Bob (30%) > Alice (20%)");
+
+        // Verify approximate percentages
+        uint256 alicePercent = (aliceRewards * 100) / topUpAmount;
+        uint256 bobPercent = (bobRewards * 100) / topUpAmount;
+        uint256 carolPercent = (carolRewards * 100) / topUpAmount;
+
+        assertApproxEqAbs(alicePercent, 20, 1, "Alice gets ~20%");
+        assertApproxEqAbs(bobPercent, 30, 1, "Bob gets ~30%");
+        assertApproxEqAbs(carolPercent, 50, 1, "Carol gets ~50%");
+
+        // Verify ratios match allocPoints (2:3:5)
+        uint256 ratio_alice_bob = (aliceRewards * 100) / bobRewards;
+        uint256 ratio_bob_carol = (bobRewards * 100) / carolRewards;
+
+        assertApproxEqAbs(ratio_alice_bob, 67, 2, "Alice:Bob ~= 2:3 (67%)");
+        assertApproxEqAbs(ratio_bob_carol, 60, 2, "Bob:Carol ~= 3:5 (60%)");
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    //              FUZZ: EMPTY POOL REDISTRIBUTION
+    // ════════════════════════════════════════════════════════════════
+
+    /// @notice CRITICAL: Single active pool should get 100% of topUp (not base %)
+    /// @dev This is the KEY test for empty pool redistribution logic
+    ///      If only pool2 is active, it gets 100% (not 50%)
+    function testFuzz_EmptyPoolRedistribution(
+        uint96 stakeAmount,
+        uint8 activePoolId,
+        uint16 daysBeforeTopUp,
+        uint96 topUpAmount
+    ) public {
+        // Bound inputs
+        stakeAmount = uint96(bound(stakeAmount, MIN_AMOUNT, 10_000 ether));
+        activePoolId = uint8(bound(activePoolId, 0, 2));
+        daysBeforeTopUp = uint16(bound(daysBeforeTopUp, 2, 50));
+        topUpAmount = uint96(bound(topUpAmount, MIN_AMOUNT * 10, 50_000 ether));
+
+        // Only stake in ONE pool (other 2 pools remain empty)
+        vm.prank(alice);
+        uint256 tokenId = staking.mint(stakeAmount, activePoolId);
+
+        // TopUp
+        skip(daysBeforeTopUp * DAY);
+        staking.topUp(topUpAmount);
+        skip(DAY);
+
+        // Claim
+        vm.prank(alice);
+        uint256 rewards = staking.earnReward(alice, tokenId);
+
+        // CRITICAL INVARIANT: Alice should get ~100% of topUp (not just her pool's base %)
+        // Because other pools are empty, their allocations are redistributed to her pool
+        uint8[] memory activePoolIds = new uint8[](1);
+        activePoolIds[0] = activePoolId;
+        uint256 expectedRewards = getPoolAllocation(
+            activePoolId,
+            topUpAmount,
+            activePoolIds
+        );
+
+        // Should get close to 100% (within 1% tolerance for rounding)
+        assertApproxEqRel(
+            rewards,
+            expectedRewards,
+            0.01e18,
+            "Single active pool should get 100% via redistribution"
+        );
+
+        // Verify it's actually ~100% of topUp, not base allocation
+        if (activePoolId == 0) {
+            // Pool 0 base allocation is 20%, but should get ~100%
+            assertGt(
+                rewards,
+                (topUpAmount * 95) / 100,
+                "Pool0 gets >95% (not 20%)"
+            );
+        } else if (activePoolId == 1) {
+            // Pool 1 base allocation is 30%, but should get ~100%
+            assertGt(
+                rewards,
+                (topUpAmount * 95) / 100,
+                "Pool1 gets >95% (not 30%)"
+            );
+        } else {
+            // Pool 2 base allocation is 50%, but should get ~100%
+            assertGt(
+                rewards,
+                (topUpAmount * 95) / 100,
+                "Pool2 gets >95% (not 50%)"
+            );
         }
     }
 
@@ -573,11 +812,17 @@ contract FuzzDistributionTest is Test {
             totalClaimed += claimed;
         }
 
-        // Calculate expected total
-        uint256 expectedTotal;
-        if (poolId == 0) expectedTotal = (totalTopUp * 20) / 100;
-        else if (poolId == 1) expectedTotal = (totalTopUp * 30) / 100;
-        else expectedTotal = (totalTopUp * 50) / 100;
+        // Calculate expected total (only this pool is active)
+        uint8[] memory activePoolIds = new uint8[](1);
+        activePoolIds[0] = poolId;
+        uint256 expectedTotal = 0;
+        for (uint256 i = 0; i < numClaims; i++) {
+            expectedTotal += getPoolAllocation(
+                poolId,
+                1000 ether,
+                activePoolIds
+            );
+        }
 
         // INVARIANT: Sum of claims should equal pool allocations
         assertApproxEqRel(
@@ -697,13 +942,13 @@ contract FuzzDistributionTest is Test {
         // Should have received something
         assertGt(rewards, 0, "Should receive rewards");
 
-        // Should not exceed 3 topUps allocation
-        uint256 maxAlloc;
-        if (poolId == 0)
-            maxAlloc = 600 ether; // 3 * 200
-        else if (poolId == 1)
-            maxAlloc = 900 ether; // 3 * 300
-        else maxAlloc = 1500 ether; // 3 * 500
+        // Should not exceed 3 topUps allocation (only this pool active)
+        uint8[] memory activePoolIds = new uint8[](1);
+        activePoolIds[0] = poolId;
+        uint256 maxAlloc = 0;
+        for (uint256 i = 0; i < 3; i++) {
+            maxAlloc += getPoolAllocation(poolId, 1000 ether, activePoolIds);
+        }
 
         assertLe(rewards, maxAlloc, "Should not exceed allocation");
     }
@@ -788,7 +1033,13 @@ contract FuzzDistributionTest is Test {
 
         // Verification phase
         {
-            uint256 poolAlloc = getPoolAllocation(poolId, topUpAmount);
+            uint8[] memory activePoolIds = new uint8[](1);
+            activePoolIds[0] = poolId;
+            uint256 poolAlloc = getPoolAllocation(
+                poolId,
+                topUpAmount,
+                activePoolIds
+            );
 
             // INVARIANT 1: Total rewards <= allocation
             assertLe(
@@ -868,11 +1119,17 @@ contract FuzzDistributionTest is Test {
         // Multiple topUps phase
         uint256 totalAllocated;
         {
+            uint8[] memory activePoolIds = new uint8[](1);
+            activePoolIds[0] = poolId;
             for (uint256 i = 0; i < numTopUps; i++) {
                 staking.topUp(5_000 ether);
 
-                // Get allocation from contract
-                totalAllocated += getPoolAllocation(poolId, 5_000 ether);
+                // Get allocation from contract (only this pool active)
+                totalAllocated += getPoolAllocation(
+                    poolId,
+                    5_000 ether,
+                    activePoolIds
+                );
                 skip(2 * DAY);
             }
             skip(DAY);

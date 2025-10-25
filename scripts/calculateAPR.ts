@@ -10,6 +10,11 @@ import { XAnonStakingNFT } from "../typechain-types";
  * 2. Historical APR (weighted average over period)
  * 3. Projected APR (for new staker entering now)
  * 4. Pool comparison metrics
+ *
+ * IMPORTANT: APR automatically accounts for Empty Pool Redistribution!
+ * The perDayRate from snapshots already reflects redistributed amounts.
+ * Example: If pool 2 was the only active pool, its snapshot perDayRate
+ * will be calculated from 100% of topUp (not 50%), resulting in higher APR.
  */
 
 // Type for contract with getPoolAPR method
@@ -128,6 +133,11 @@ async function getRecentSnapshots(
 
 /**
  * Calculate historical APR from snapshots
+ *
+ * NOTE: This function automatically accounts for empty pool redistribution
+ * because it reads perDayRate from actual snapshots. Each snapshot's perDayRate
+ * was calculated from the actual reward amount allocated to that pool
+ * (after empty pool redistribution was applied).
  */
 function calculateHistoricalAPR(
   snapshots: Array<{ day: bigint; rate: bigint }>,
