@@ -16,6 +16,7 @@ interface IxAnonStakingNFT {
     event Mint(
         address indexed user,
         uint256 indexed tokenId,
+        uint256 pid,
         uint256 amount,
         uint256 lockedUntil
     );
@@ -23,12 +24,14 @@ interface IxAnonStakingNFT {
         address indexed caller,
         address indexed to,
         uint256 indexed tokenId,
+        uint256 pid,
         uint256 amount
     );
     event EarnReward(
         address indexed caller,
         address indexed to,
         uint256 indexed tokenId,
+        uint256 pid,
         uint256 reward
     );
     event TopUp(address indexed caller, uint256 indexed poolId, uint256 amount);
@@ -110,9 +113,10 @@ interface IxAnonStakingNFT {
     /// @notice Get stored position data
     /// @param tokenId Position id
     /// @return position StakingPosition view struct
+    /// @return pendingRewards Pending rewards
     function positionOf(
         uint256 tokenId
-    ) external view returns (PositionData memory position);
+    ) external view returns (PositionData memory position, uint256 pendingRewards);
 
     /// @notice Get a specific reward snapshot for a pool
     /// @param pid Pool id

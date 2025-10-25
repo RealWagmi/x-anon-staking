@@ -192,7 +192,7 @@ contract xAnonStakingNFT is
 
         totalStaked += amount; // Track total principal
         _safeErc20TransferFrom(ANON_TOKEN, msg.sender, amount);
-        emit Mint(msg.sender, tokenId, amount, lockTime);
+        emit Mint(msg.sender, tokenId, pid, amount, lockTime);
     }
 
     /// @notice Burn position NFT and withdraw principal + rewards
@@ -248,7 +248,7 @@ contract xAnonStakingNFT is
 
         // CRITICAL: Verify principal protection AFTER reward payout
         _ensurePrincipalProtection();
-        emit EarnReward(msg.sender, to, tokenId, payout);
+        emit EarnReward(msg.sender, to, tokenId, position.poolId, payout);
 
         return payout;
     }
@@ -374,7 +374,7 @@ contract xAnonStakingNFT is
     /// @return pending Estimated reward amount
     function pendingRewards(
         uint256 tokenId
-    ) external view returns (uint256 pending) {
+    ) public view returns (uint256 pending) {
         address owner = _ownerOf(tokenId);
         if (owner == address(0)) return 0;
         IxAnonStakingNFT.PositionData memory position = _positions[tokenId];
@@ -553,10 +553,11 @@ contract xAnonStakingNFT is
     ///
     /// @param tokenId Position NFT ID
     /// @return position Position data struct
+    /// @return pendingRewards Pending rewards
     function positionOf(
         uint256 tokenId
-    ) external view returns (IxAnonStakingNFT.PositionData memory) {
-        return _positions[tokenId];
+    ) external view returns (IxAnonStakingNFT.PositionData memory, uint256) {
+        return (_positions[tokenId], pendingRewards(tokenId));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -735,7 +736,7 @@ contract xAnonStakingNFT is
 
             if (payout > 0) {
                 _safeErc20Transfer(ANON_TOKEN, to, payout);
-                emit EarnReward(msg.sender, to, tokenId, payout);
+                emit EarnReward(msg.sender, to, tokenId, position.poolId, payout);
             }
         }
         delete _positions[tokenId];
@@ -744,7 +745,7 @@ contract xAnonStakingNFT is
 
         // CRITICAL: Verify principal protection AFTER all transfers
         _ensurePrincipalProtection();
-        emit Burn(msg.sender, to, tokenId, amount);
+        emit Burn(msg.sender, to, tokenId, position.poolId, amount);
     }
 
     /// @dev Compute and collect rewards for a position up to min(nowDay, lockedUntilDay).
