@@ -27,21 +27,16 @@ error NoRewards();
 error TopUpTooFrequent();
 error CannotRescueAnonToken();
 error InsufficientPrincipal();
+error NoActiveStake();
 
 /// @title xAnonStakingNFT - Time-Weighted Staking with NFT Positions
-/// @author AltRecipe Team
 /// @notice NFT-based staking system with three fixed pools and time-weighted rewards
-/// @dev Implements stake-days accounting with three immutable pools:
-///      - Pool 0: 91 days lock, 20% reward allocation
-///      - Pool 1: 182 days lock, 30% reward allocation
-///      - Pool 2: 365 days lock, 50% reward allocation
-///
-///      Key features:
-///      - O(1) scalability: no iteration over users
-///      - Fair time-weighting: earlier stakers earn proportionally more
-///      - Ring buffer expiration: precise handling of position expirations
-///      - Principal protection: totalStaked tracking ensures user funds safety
-///      - Fixed allocation: 20/30/50 split cannot be changed post-deployment
+/// @dev Key Features:
+///      - Three fixed pools with different lock periods (91/182/365 days) and allocations (20%/30%/50%)
+///      - Empty Pool Redistribution: rewards from empty pools automatically go to active pools
+///      - Per-pool topUp frequency control (minimum 2 days between topUps per pool)
+///      - Ring buffer for O(1) expiration tracking
+///      - Principal protection: contract balance >= totalStaked
 contract xAnonStakingNFT is
     ERC721Enumerable,
     IxAnonStakingNFT,
@@ -53,11 +48,13 @@ contract xAnonStakingNFT is
     uint256 private constant MAX_DAILY_ROLL = 1000; // Max days to process day-by-day (gas protection)
     uint256 public constant MIN_AMOUNT = 1 ether; // Minimum topUp to prevent DoS (1 ANON tokens)
 
-    // Fixed pool configuration (3 pools only)
+    // Fixed pool configuration (3 pools only, immutable)
     uint256 private constant POOL_COUNT = 3;
-    uint256 private constant TOTAL_ALLOC_POINT = 10000; // 100% = 10000 basis points
+    uint256 private constant TOTAL_ALLOC_POINT = 10000; // 100% = 10000 basis points (for reference)
 
     // Pool 0: Short (91 days, 20% allocation)
+    // Allocation: 2000/10000 = 20% when all pools active
+    // With empty pool redistribution: gets larger share if other pools empty
     uint16 private constant POOL0_ALLOC = 2000;
     uint256 private constant POOL0_LOCK_DAYS = 91;
 
@@ -82,6 +79,7 @@ contract xAnonStakingNFT is
     /// @notice Each pool tracks active stakes, expirations, and reward distribution independently
     struct Pool {
         /// @notice Allocation points (immutable): 2000/3000/5000 for 20%/30%/50% split
+        /// @dev Used for proportional reward distribution among active pools only (empty pools skipped)
         uint16 allocPoint;
         /// @notice Lock period in days (immutable): 91/182/365
         uint256 lockDays;
@@ -90,19 +88,20 @@ contract xAnonStakingNFT is
         uint256 rollingActiveStake;
         /// @notice Last day when ring buffer and stake-days were updated
         uint256 lastUpdatedDay;
+        /// @notice Last day when this pool was included in topUp distribution
+        /// @dev Per-pool topUp frequency control: prevents topUp more frequently than once per 2 days
+        ///      This is checked individually per pool (not global), allowing different pools to topUp independently
+        uint256 lastTopUpDay;
         /// @dev Ring buffer for tracking daily deposits: dayBuckets[day % lockDays] = amount
         ///      Enables O(1) expiration of old stakes
         mapping(uint256 => uint256) dayBuckets;
-        /// @notice Total stake-days accumulated since pool creation
-        /// @dev Increases daily by rollingActiveStake amount
+        /// @notice Total stake-days accumulated since last topUp
+        /// @dev Resets to 0 after each topUp. Increases daily by rollingActiveStake amount.
+        ///      Example: 100 tokens active for 5 days = 500 stake-days
         uint256 poolStakeDays;
-        /// @notice Checkpoint: poolStakeDays value at last topUp
-        /// @dev Used to calculate interval stake-days: poolStakeDays - poolStakeDaysAtLastTopUp
-        uint256 poolStakeDaysAtLastTopUp;
         /// @notice Array of reward snapshots defining interval boundaries and rates
+        /// @dev Each snapshot: (endDay, perDayRate). First snapshot is init with perDayRate=0
         RewardSnapshot[] snapshots;
-        /// @notice Rewards waiting for first interval to form (when poolStakeDays = 0)
-        uint256 pendingRewards;
     }
 
     address private immutable _tokenDescriptor;
@@ -112,7 +111,6 @@ contract xAnonStakingNFT is
 
     /// @dev Storage optimization: packed in single slot (30/32 bytes used)
     uint176 private _nextId = 1; // Next tokenId to mint (22 bytes)
-    uint64 private _lastTopUpDay; // Last topUp day (8 bytes)
 
     /// @notice Total principal staked across all positions
     /// @dev Used for principal protection: ensures contract balance >= totalStaked
@@ -147,8 +145,17 @@ contract xAnonStakingNFT is
     // ═══════════════════════════════════════════════════════════════
 
     /// @notice Create a new staking position NFT
-    /// @dev Transfers tokens from user, mints NFT, and adds stake to pool's ring buffer
-    ///      Position starts earning rewards immediately based on stake-days accumulation
+    /// @dev Staking process:
+    ///      1. Validates amount and pool ID
+    ///      2. Updates pool state (_rollPool)
+    ///      3. Mints NFT to user
+    ///      4. Adds stake to ring buffer at (currentDay - 1) % lockDays
+    ///      5. Increases rollingActiveStake
+    ///      6. Sets position data with lock expiration
+    ///
+    ///      Position starts earning rewards from the day AFTER minting (currentDay + 1).
+    ///      This prevents same-block mint + topUp exploits.
+    ///
     /// @param amount Amount of ANON tokens to stake (minimum: MIN_AMOUNT = 1 ether)
     /// @param pid Pool ID: 0 (91d), 1 (182d), or 2 (365d)
     /// @return tokenId ID of newly minted NFT position
@@ -160,15 +167,21 @@ contract xAnonStakingNFT is
         if (amount > type(uint96).max) revert AmountExceedsMaximum();
         if (pid >= POOL_COUNT) revert InvalidPoolId();
         Pool storage pool = _pools[pid];
-        _updatePoolState(pool);
-
+        _rollPool(pool);
         _safeMint(msg.sender, (tokenId = _nextId++));
 
-        uint256 dayIdx = _currentDay() % pool.lockDays;
+        // Initialize lastTopUpDay when pool becomes active (first stake)
+        if (pool.rollingActiveStake == 0) {
+            pool.lastTopUpDay = _currentDay();
+        }
+
+        uint256 dayIdx = (_currentDay() - 1) % pool.lockDays;
 
         pool.dayBuckets[dayIdx] += amount;
         pool.rollingActiveStake += amount;
 
+        // lockedUntil = start of day (currentDay + lockDays)
+        // Tokens expire in ring buffer on this same day (after accumulating stake-days)
         uint256 lockTime = (_currentDay() + pool.lockDays) * 1 days;
         _positions[tokenId] = IxAnonStakingNFT.PositionData({
             amount: uint96(amount),
@@ -226,7 +239,7 @@ contract xAnonStakingNFT is
         IxAnonStakingNFT.PositionData storage position = _positions[tokenId];
         Pool storage pool = _pools[position.poolId];
 
-        _updatePoolState(pool);
+        _rollPool(pool);
 
         uint256 payout = _collectPositionRewards(pool, position);
         if (payout == 0) revert NoRewards();
@@ -240,53 +253,92 @@ contract xAnonStakingNFT is
         return payout;
     }
 
-    /// @notice Add rewards to be distributed across all pools
-    /// @dev Distributes rewards with fixed allocation: 20% pool0, 30% pool1, 50% pool2
+    /// @notice Add rewards to active pools (skips empty pools)
+    /// @dev Empty Pool Redistribution Algorithm:
+    ///      Distributes rewards ONLY to pools with accumulated stake-days (poolStakeDays > 0).
+    ///      Empty pools are skipped, and their allocations are redistributed proportionally among active pools.
     ///
-    ///      Reward distribution algorithm:
-    ///      1. Updates each pool's ring buffer and stake-days
-    ///      2. Creates intermediate snapshot (if gap exists since last topUp)
-    ///      3. Distributes pool's share: creates snapshot with perDayRate or adds to pending
+    ///      Example: If pool0 and pool1 are empty, pool2 gets 100% of rewards (not 50%).
+    ///
+    ///      Distribution Steps:
+    ///      1. Update all pools (_rollPool): advance ring buffers, accumulate stake-days
+    ///      2. Identify active pools: check poolStakeDays > 0 and lastTopUpDay + 2 days elapsed
+    ///      3. Calculate total allocation: sum allocPoints of active pools only
+    ///      4. Distribute proportionally: each active pool gets (amount * allocPoint / totalActiveAllocPoint)
+    ///      5. Create snapshots: record perDayRate for each active pool
+    ///      6. Reset poolStakeDays to 0 for next interval
+    ///
+    ///      Per-Pool TopUp Frequency:
+    ///      - Each pool enforces minimum 2-day gap independently
+    ///      - Prevents reward calculation issues from too frequent distributions
+    ///      - Allows different pools to receive topUps at different times
     ///
     ///      Restrictions:
     ///      - Minimum amount: MIN_AMOUNT (1 ANON) to prevent DoS
-    ///      - Minimum interval: 2 days between topUps (ensures clean interval separation)
-    ///      - Anyone can call (not restricted to owner)
+    ///      - Only owner can call
+    ///      - At least one pool must have active stakes (reverts NoActiveStake otherwise)
     ///
-    /// @param amount Total ANON tokens to add as rewards (split 20/30/50 across pools)
+    /// @param amount Total ANON tokens to add as rewards
     /// @return bool Always returns true on success
     function topUp(
         uint256 amount
     ) external nonReentrant onlyOwner returns (bool) {
         if (amount < MIN_AMOUNT) revert AmountTooSmall();
 
-        // Prevent topUp more frequently than once per 2 days
         uint256 today = _currentDay();
-        if (today < _lastTopUpDay + 2) revert TopUpTooFrequent();
-        _lastTopUpDay = uint64(today);
-
         _safeErc20TransferFrom(ANON_TOKEN, msg.sender, amount);
-        uint256 remaining = amount;
+
+        // Step 1: Update all pools and identify active ones
+        uint256 totalActiveAllocPoint = 0;
+        bool[POOL_COUNT] memory isActive;
 
         for (uint256 i = 0; i < POOL_COUNT; i++) {
             Pool storage pool = _pools[i];
+            _rollPool(pool);
 
-            // Step 1: Update pool state to current day
-            _updatePoolState(pool);
+            // Pool is active if it has stake-days
+            if (pool.poolStakeDays > 0) {
+                // Prevent topUp more frequently than once per 2 days for each pool
+                if (today < pool.lastTopUpDay + 2) revert TopUpTooFrequent();
 
-            // Step 2: Create intermediate snapshot if needed (closes old interval at "yesterday")
-            _createIntermediateSnapshot(pool);
+                isActive[i] = true;
+                totalActiveAllocPoint += pool.allocPoint;
+            }
+        }
 
-            // Step 3: Calculate this pool's share
-            uint256 part = (amount * pool.allocPoint) / TOTAL_ALLOC_POINT;
-            if (i == POOL_COUNT - 1)
-                part = remaining; // Fix rounding for last pool
-            else remaining -= part;
+        // Step 2: Revert if ALL pools are empty
+        if (totalActiveAllocPoint == 0) revert NoActiveStake();
+
+        // Step 3: Distribute rewards only to active pools
+        uint256 remaining = amount;
+
+        for (uint256 i = 0; i < POOL_COUNT; i++) {
+            if (!isActive[i]) continue; // Skip empty pools
+
+            Pool storage pool = _pools[i];
+
+            // Calculate this pool's share from total amount based on active pools
+            uint256 part = (amount * pool.allocPoint) / totalActiveAllocPoint;
+
+            // Find if this is the last active pool to fix rounding
+            bool isLastActive = true;
+            for (uint256 j = i + 1; j < POOL_COUNT; j++) {
+                if (isActive[j]) {
+                    isLastActive = false;
+                    break;
+                }
+            }
+
+            if (isLastActive) {
+                part = remaining; // Give all remaining to last active pool
+            } else {
+                remaining -= part;
+            }
 
             if (part == 0) continue;
-
-            // Step 4: Create main snapshot at current day or add to pending
+            // Step 4: Create snapshot and update lastTopUpDay
             _distributeRewards(pool, part, today);
+            pool.lastTopUpDay = today;
 
             emit TopUp(msg.sender, i, part);
         }
@@ -315,25 +367,22 @@ contract xAnonStakingNFT is
 
     /// @notice Estimate claimable rewards for a position
     /// @dev Returns approximate value based on last on-chain state.
-    ///      IMPORTANT: Does NOT simulate ring buffer rolls or stake-day accumulation.
-    ///      If many days passed since last transaction, actual earnReward() may pay more.
-    ///
     ///      Returns 0 for non-existent tokens (does not revert).
     ///
     /// @param tokenId Position NFT ID
-    /// @return pending Estimated reward amount (may be lower than actual)
+    /// @return pending Estimated reward amount
     function pendingRewards(
         uint256 tokenId
     ) external view returns (uint256 pending) {
         address owner = _ownerOf(tokenId);
         if (owner == address(0)) return 0;
-        IxAnonStakingNFT.PositionData storage position = _positions[tokenId];
-        Pool storage pool = _pools[position.poolId];
-        if (pool.snapshots.length == 0) return 0;
+        IxAnonStakingNFT.PositionData memory position = _positions[tokenId];
+        RewardSnapshot[] memory snaps = _pools[position.poolId].snapshots;
+        if (snaps.length == 0) return 0;
         uint256 capDay = _getCapDay(position);
         uint256 startDay = position.lastPaidDay;
         if (capDay <= startDay) return 0;
-        return _earnedDaysInterval(pool, startDay, capDay, position.amount);
+        return _earnedDaysInterval(snaps, startDay, capDay, position.amount);
     }
 
     /// @notice Get pool configuration and current state
@@ -560,11 +609,9 @@ contract xAnonStakingNFT is
         pool.allocPoint = allocPoint;
         pool.lockDays = lockDays;
         pool.lastUpdatedDay = _currentDay();
-        pool.poolStakeDaysAtLastTopUp = 0;
         pool.snapshots.push(
             RewardSnapshot({day: _currentDay(), perDayRate: 0})
         );
-        pool.pendingRewards = 0;
         emit PoolAdded(pid, allocPoint, lockDays);
     }
 
@@ -576,19 +623,23 @@ contract xAnonStakingNFT is
 
     /// @dev Update pool to current day: advance ring buffer and accumulate stake-days
     ///
+    ///      This function is called before every state-changing operation to ensure pool data is current.
+    ///
     ///      Ring Buffer Mechanics:
     ///      - Tracks deposits by day: dayBuckets[day % lockDays]
-    ///      - When advancing to day N, bucket at (N % lockDays) contains deposits that expire
+    ///      - When advancing to day N, bucket at (N % lockDays) contains deposits that expired on this day
     ///      - Expired amounts are subtracted from rollingActiveStake
+    ///      - Enables O(1) expiration without iterating all positions
     ///
     ///      Stake-Days Accumulation:
     ///      - Each day adds rollingActiveStake to poolStakeDays
     ///      - Example: 100 tokens active for 5 days → 500 stake-days
+    ///      - Used for fair reward distribution: more stake-days = larger share
     ///
-    ///      Gas Optimization:
+    ///      Gas Optimization for Large Gaps:
     ///      - Small gap (≤1000 days): precise day-by-day iteration
-    ///      - Large gap (>1000 days): approximation (constant stake over gap)
-    ///        Tests verify no overpayment occurs with approximation.
+    ///      - Large gap (>1000 days): approximation (accumulate for active period only, then clear buffers)
+    ///      - Tests verify no overpayment occurs with approximation
     ///
     /// @param pool Pool storage reference to update
     function _rollPool(Pool storage pool) internal {
@@ -630,106 +681,30 @@ contract xAnonStakingNFT is
             pool.lastUpdatedDay = currDay;
         } else {
             // Normal case: process day-by-day for accurate stake-days accounting
+            // CRITICAL PRINCIPLE: Do NOT include currDay (topUp day excluded from period)
+            // Process days from (lastUpdatedDay+1) to (currDay-1) inclusive
             while (lastUpdatedDay < currDay) {
-                // Step 1: Accumulate stake-days for one day
+                // Accumulate stake-days for this day
                 poolStakeDays += activeStake;
-
-                // Step 2: Clear expirations for next day
-                lastUpdatedDay++;
+                // Clear expirations for this day
                 uint256 idx = lastUpdatedDay % lockDays;
                 uint256 expired = pool.dayBuckets[idx];
                 if (expired > 0) {
                     activeStake -= expired;
                     pool.dayBuckets[idx] = 0;
                 }
+
+                // Increment day first
+                lastUpdatedDay++;
             }
+
+            // Set lastUpdatedDay to currDay (but don't process it)
+            pool.lastUpdatedDay = currDay;
 
             // Write back all updates at once
             pool.poolStakeDays = poolStakeDays;
             pool.rollingActiveStake = activeStake;
-            pool.lastUpdatedDay = currDay;
         }
-    }
-
-    /// @dev Convert pending rewards into snapshot if interval exists
-    ///
-    ///      Called after _rollPool to distribute accumulated pending rewards.
-    ///      Does NOT accumulate stake-days (that's _rollPool's job).
-    ///
-    ///      Pending rewards exist when:
-    ///      - topUp occurs with intervalStakeDays = 0 (no interval formed yet)
-    ///      - Rewards accumulate until first interval forms
-    ///
-    ///      INVARIANT: 1 day of stake = stake amount numerically
-    ///      Critical for "yesterday snapshot" logic in topUp.
-    ///
-    /// @param pool Pool storage reference
-    function _finalizePendingRewards(Pool storage pool) internal {
-        // If there are pending rewards, distribute them
-        if (pool.pendingRewards > 0) {
-            _distributeRewards(pool, 0, _currentDay());
-        }
-    }
-
-    /// @dev Create intermediate snapshot at "yesterday" before processing new topUp
-    ///
-    ///      Purpose: Prevents dilution from today's new stakers
-    ///
-    ///      Why needed: Without this, new stakers entering "today" would immediately
-    ///      share in the topUp rewards despite not having accumulated stake-days.
-    ///
-    ///      Creates snapshot ONLY if:
-    ///      1. Real snapshot exists (not just init with perDayRate=0)
-    ///      2. Gap exists since last snapshot
-    ///      3. Yesterday > last snapshot day (prevents duplicates)
-    ///      4. Stake-days until yesterday > 0
-    ///
-    ///      Snapshot has perDayRate=0 (closes interval with no new rewards).
-    ///
-    /// @param pool Pool storage reference
-    function _createIntermediateSnapshot(Pool storage pool) internal {
-        // Skip if no real snapshots yet (only init snapshot with perDayRate=0)
-        // Only create intermediate if we have at least one real snapshot or init has perDayRate > 0
-        uint256 snapsLength = pool.snapshots.length;
-        if (snapsLength == 0) return;
-        if (snapsLength == 1 && pool.snapshots[0].perDayRate == 0) return;
-
-        uint256 lastSnapshotDay = pool.snapshots[snapsLength - 1].day;
-        uint256 today = _currentDay();
-
-        // No gap = same day topUp, skip intermediate
-        if (today <= lastSnapshotDay) return;
-
-        uint256 yesterday = today - 1;
-
-        // Verify yesterday is after last snapshot (avoid duplicates)
-        if (yesterday <= lastSnapshotDay) return;
-
-        // Calculate stake-days accumulated in old interval
-        uint256 oldIntervalSD = pool.poolStakeDays -
-            pool.poolStakeDaysAtLastTopUp;
-        if (oldIntervalSD == 0) return;
-
-        // Exclude today's stake-days from the interval
-        // INVARIANT: today's token-days = rollingActiveStake (numerically)
-        uint256 todayTokenDays = pool.rollingActiveStake;
-        uint256 stakeDaysUntilYesterday = oldIntervalSD > todayTokenDays
-            ? oldIntervalSD - todayTokenDays
-            : 0;
-
-        if (stakeDaysUntilYesterday == 0) return;
-
-        // Create intermediate snapshot at yesterday with perDayRate = 0
-        // NOTE: pendingRewards are always 0 at this point because _finalizePendingRewards
-        //       was called before this function in topUp and either:
-        //       1. Created a snapshot and zeroed pending (if intervalSD > 0), OR
-        //       2. Left pending unchanged, but then intervalSD == 0 means oldIntervalSD == 0,
-        //          so we would have returned at line 591.
-        //       Therefore intermediate snapshots always have perDayRate = 0.
-        pool.snapshots.push(RewardSnapshot({day: yesterday, perDayRate: 0}));
-
-        // Update checkpoint: exclude today's token-days
-        pool.poolStakeDaysAtLastTopUp = pool.poolStakeDays - todayTokenDays;
     }
 
     /// @dev Common logic for burning a position and transferring principal.
@@ -748,7 +723,7 @@ contract xAnonStakingNFT is
         IxAnonStakingNFT.PositionData storage position = _positions[tokenId];
         if (block.timestamp < position.lockedUntil) revert PositionLocked();
         Pool storage pool = _pools[position.poolId];
-        _updatePoolState(pool);
+        _rollPool(pool);
 
         amount = position.amount;
         totalStaked -= amount; // Decrease total principal
@@ -786,7 +761,12 @@ contract xAnonStakingNFT is
         uint256 startDay = position.lastPaidDay;
         if (capDay <= startDay) return 0;
 
-        payout = _earnedDaysInterval(pool, startDay, capDay, position.amount);
+        payout = _earnedDaysInterval(
+            pool.snapshots,
+            startDay,
+            capDay,
+            position.amount
+        );
 
         if (payout == 0) return 0;
 
@@ -800,19 +780,15 @@ contract xAnonStakingNFT is
 
     /// @dev Binary search: first snapshot with end day > query day
     ///      Canonical implementation - finds smallest index i where snaps[i].day > day
-    /// @param pool Pool storage reference
+    /// @param snaps Array of snapshots
     /// @param day Query day
     /// @return idx Index of first snapshot after day, or len if not found
     function _firstSnapshotAfter(
-        Pool storage pool,
+        RewardSnapshot[] memory snaps,
         uint256 day
-    ) internal view returns (uint256 idx) {
-        RewardSnapshot[] storage snaps = pool.snapshots;
-        uint256 len = snaps.length;
-        if (len == 0) return type(uint256).max;
-
+    ) internal pure returns (uint256 idx) {
         uint256 lo = 0;
-        uint256 hi = len;
+        uint256 hi = snaps.length;
 
         while (lo < hi) {
             uint256 mid = lo + (hi - lo) / 2; // Overflow-safe
@@ -829,21 +805,20 @@ contract xAnonStakingNFT is
     /// @dev Compute rewards over (fromDay, toDay] by summing overlaps with snapshots:
     ///      reward = amount * sum_i(perDayRate_i * overlapDays_i) / PRECISION
     function _earnedDaysInterval(
-        Pool storage pool,
+        RewardSnapshot[] memory snaps,
         uint256 fromDay,
         uint256 toDay,
         uint256 amount
-    ) internal view returns (uint256) {
+    ) internal pure returns (uint256) {
         if (toDay <= fromDay) return 0;
-        RewardSnapshot[] storage snaps = pool.snapshots;
-        if (snaps.length == 0) return 0;
+        uint256 snapsLength = snaps.length;
+        if (snapsLength == 0) return 0;
 
         uint256 total;
-        uint256 i = _firstSnapshotAfter(pool, fromDay);
-        uint256 snapsLength = snaps.length;
-        if (i == snapsLength) return 0;
+        uint256 i = _firstSnapshotAfter(snaps, fromDay);
 
-        // Cache previous snapshot day to avoid repeated SLOAD
+        if (i == snapsLength) return 0; // no snapshots after fromDay
+
         uint256 prevDay = (i == 0) ? 0 : snaps[i - 1].day;
 
         for (; i < snapsLength; i++) {
@@ -888,50 +863,44 @@ contract xAnonStakingNFT is
         if (!_isAuthorized(owner, msg.sender, tokenId)) revert NotAuthorized();
     }
 
-    /// @dev Bring pool to current day (roll ring buffer + finalize pending)
-    /// @param pool Pool storage reference
-    function _updatePoolState(Pool storage pool) private {
-        _rollPool(pool);
-        _finalizePendingRewards(pool);
-    }
-
     /// @dev Get last day position can earn rewards (min of now and unlock day)
     /// @param position Position data
     /// @return capDay Maximum reward accrual day
     function _getCapDay(
-        IxAnonStakingNFT.PositionData storage position
+        IxAnonStakingNFT.PositionData memory position
     ) private view returns (uint256 capDay) {
         return _min(_currentDay(), position.lockedUntil / 1 days);
     }
 
-    /// @dev Distribute rewards: create snapshot or add to pending
+    /// @dev Distribute rewards: create snapshot and reset stake-days
     ///
-    ///      If interval has stake-days: creates snapshot with perDayRate
-    ///      If no interval yet: adds to pending (waits for first stake-days)
+    ///      Algorithm:
+    ///      1. Calculate perDayRate: rewardAmount * PRECISION / poolStakeDays
+    ///      2. Create snapshot: (snapshotDay, perDayRate)
+    ///      3. Reset poolStakeDays to 0 for next interval
+    ///
+    ///      CRITICAL: poolStakeDays must be > 0 (caller's responsibility to check)
+    ///      Empty pools are never passed to this function (handled in topUp)
     ///
     /// @param pool Pool storage reference
-    /// @param rewardAmount New rewards to add
-    /// @param snapshotDay Day to mark snapshot (usually current day)
-    /// @return created True if snapshot created, false if added to pending
+    /// @param rewardAmount Reward allocation for this pool (after empty pool redistribution)
+    /// @param snapshotDay Day to mark snapshot end (typically today)
+    /// @return created Always returns true (snapshot always created)
     function _distributeRewards(
         Pool storage pool,
         uint256 rewardAmount,
         uint256 snapshotDay
     ) private returns (bool created) {
-        uint256 intervalSD = pool.poolStakeDays - pool.poolStakeDaysAtLastTopUp;
-        if (intervalSD > 0) {
-            uint256 totalReward = pool.pendingRewards + rewardAmount;
-            uint256 perDay = Math.mulDiv(totalReward, PRECISION, intervalSD);
-            pool.snapshots.push(
-                RewardSnapshot({day: snapshotDay, perDayRate: perDay})
-            );
-            pool.poolStakeDaysAtLastTopUp = pool.poolStakeDays;
-            pool.pendingRewards = 0;
-            return true;
-        } else {
-            pool.pendingRewards += rewardAmount;
-            return false;
-        }
+        uint256 perDay = Math.mulDiv(
+            rewardAmount,
+            PRECISION,
+            pool.poolStakeDays // always > 0
+        );
+        pool.snapshots.push(
+            RewardSnapshot({day: snapshotDay, perDayRate: perDay})
+        );
+        pool.poolStakeDays = 0; // Reset for next interval
+        return true;
     }
 
     function _min(uint256 a, uint256 b) private pure returns (uint256) {
