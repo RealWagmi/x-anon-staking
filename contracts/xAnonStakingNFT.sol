@@ -289,8 +289,11 @@ contract xAnonStakingNFT is
         _safeErc20TransferFrom(ANON_TOKEN, msg.sender, amount);
 
         // Step 1: Update all pools and identify active ones
+        // Cache allocPoints to avoid repeated storage reads in step 3
         uint256 totalActiveAllocPoint = 0;
         bool[POOL_COUNT] memory isActive;
+        uint16[POOL_COUNT] memory allocPoints; // Cache allocPoints from storage
+        uint256 lastActivePool; // Track last active pool index for rounding fix
 
         for (uint256 i = 0; i < POOL_COUNT; i++) {
             Pool storage pool = _pools[i];
@@ -302,6 +305,8 @@ contract xAnonStakingNFT is
                 if (today < pool.lastTopUpDay + 2) revert TopUpTooFrequent();
 
                 isActive[i] = true;
+                lastActivePool = i; // Remember last active pool
+                allocPoints[i] = pool.allocPoint; // Cache allocPoint
                 totalActiveAllocPoint += pool.allocPoint;
             }
         }
@@ -315,27 +320,23 @@ contract xAnonStakingNFT is
         for (uint256 i = 0; i < POOL_COUNT; i++) {
             if (!isActive[i]) continue; // Skip empty pools
 
-            Pool storage pool = _pools[i];
-
             // Calculate this pool's share from total amount based on active pools
-            uint256 part = (amount * pool.allocPoint) / totalActiveAllocPoint;
+            // Use cached allocPoint instead of reading from storage again
+            uint256 part;
 
-            // Find if this is the last active pool to fix rounding
-            bool isLastActive = true;
-            for (uint256 j = i + 1; j < POOL_COUNT; j++) {
-                if (isActive[j]) {
-                    isLastActive = false;
-                    break;
-                }
-            }
-
-            if (isLastActive) {
-                part = remaining; // Give all remaining to last active pool
+            if (i == lastActivePool) {
+                // Last active pool gets all remaining (fixes rounding)
+                part = remaining;
             } else {
+                part = (amount * allocPoints[i]) / totalActiveAllocPoint;
                 remaining -= part;
             }
 
             if (part == 0) continue;
+
+            // Only access storage once per active pool for distribution
+            Pool storage pool = _pools[i];
+
             // Step 4: Create snapshot and update lastTopUpDay
             _distributeRewards(pool, part, today);
             pool.lastTopUpDay = today;
