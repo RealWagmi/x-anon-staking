@@ -1,0 +1,41 @@
+name: Format Code
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '22.13.1'
+          cache: 'npm'
+
+      - run: npm install
+      - run: cp .env_example .env
+      - run: npm run lint:fix
+      - run: npm run compile
+      
+      - name: Run tests and capture output
+        run: npm run test 2>&1 | tee test-output.txt
+        continue-on-error: true
+      
+      - name: Update README with test results
+        run: node scripts/update-readme-tests.js
+      
+      - name: Auto-commit formatted code and test results
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: 'chore: auto-format code and update test results'

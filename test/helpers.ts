@@ -1,4 +1,4 @@
-import { ethers } from "hardhat";
+import { ethers } from 'hardhat';
 
 /**
  * Calculate how much a pool receives from topUp based on empty pool redistribution
@@ -14,7 +14,7 @@ export async function calculatePoolShare(
   contract: any,
   poolId: number,
   activePoolIds: number[],
-  topUpAmount: bigint
+  topUpAmount: bigint,
 ): Promise<bigint> {
   // If pool is not active, it gets nothing
   if (!activePoolIds.includes(poolId)) {
@@ -58,21 +58,13 @@ export async function calculatePoolShare(
 /**
  * Helper for most common case: only one pool is active (gets 100% of topUp)
  */
-export async function singlePoolActive(
-  contract: any,
-  poolId: number,
-  topUpAmount: bigint
-): Promise<bigint> {
+export async function singlePoolActive(contract: any, poolId: number, topUpAmount: bigint): Promise<bigint> {
   return calculatePoolShare(contract, poolId, [poolId], topUpAmount);
 }
 
 /**
  * Helper for case where all 3 pools are active (normal distribution)
  */
-export async function allPoolsActive(
-  contract: any,
-  poolId: number,
-  topUpAmount: bigint
-): Promise<bigint> {
+export async function allPoolsActive(contract: any, poolId: number, topUpAmount: bigint): Promise<bigint> {
   return calculatePoolShare(contract, poolId, [0, 1, 2], topUpAmount);
 }
