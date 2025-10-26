@@ -8,6 +8,7 @@
     "test:fuzz": "forge test --match-path test/foundry/FuzzDistribution.t.sol -vv",
     "test:fuzz:deep": "forge test --match-path test/foundry/FuzzDistribution.t.sol --fuzz-runs 10000 -vv",
     "coverage": "hardhat coverage",
+    "lint:fix": "prettier --write --plugin=prettier-plugin-solidity 'contracts/**/*.sol' && prettier --write './**/*.{ts,tsx,js,jsx}'",
     "deploy": "npx hardhat run ./scripts/deploy.ts --network $npm_config_network"
   },
   "devDependencies": {
@@ -16,6 +17,8 @@
     "@types/chai": "^4.3.11",
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.11.30",
+    "prettier": "^3.5.3",
+    "prettier-plugin-solidity": "^2.1.0",
     "dotenv": "^16.4.5",
     "hardhat": "^2.22.5",
     "ts-node": "^10.9.2",
