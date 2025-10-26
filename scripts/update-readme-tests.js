@@ -33,11 +33,17 @@ let testList = [];
 
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i].trim();
-  
+
   // Detect test suite headers (usually indented and without checkmark)
-  if (line && !line.startsWith('✔') && !line.startsWith('✓') && 
-      !line.includes('passing') && !line.includes('·-') && 
-      !line.includes('|') && line.length < 100) {
+  if (
+    line &&
+    !line.startsWith('✔') &&
+    !line.startsWith('✓') &&
+    !line.includes('passing') &&
+    !line.includes('·-') &&
+    !line.includes('|') &&
+    line.length < 100
+  ) {
     // Check if this looks like a test suite name
     const nextLine = lines[i + 1]?.trim();
     if (nextLine && (nextLine.startsWith('✔') || nextLine.startsWith('✓'))) {
@@ -48,13 +54,13 @@ for (let i = 0; i < lines.length; i++) {
       currentSection = line;
     }
   }
-  
+
   // Detect passing tests
   if (line.startsWith('✔') || line.startsWith('✓')) {
     const testName = line.replace(/^[✔✓]\s+/, '').replace(/\s+\(\d+m?s?\)$/, '');
     testList.push({ name: testName, status: 'pass' });
   }
-  
+
   // Detect failing tests
   if (line.match(/^\d+\)/)) {
     const testName = line.replace(/^\d+\)\s+/, '');
@@ -74,7 +80,7 @@ const gasReportEnd = cleanOutput.lastIndexOf('·--------------------------------
 
 if (gasReportStart !== -1 && gasReportEnd !== -1 && gasReportEnd > gasReportStart) {
   const gasLines = cleanOutput.substring(gasReportStart, gasReportEnd + 42).split('\n');
-  gasReport = gasLines.map(line => line.trim()).join('\n');
+  gasReport = gasLines.map((line) => line.trim()).join('\n');
 }
 
 // Build test results section
@@ -91,21 +97,21 @@ testResultsSection += `> **Updated:** ${timestamp}\n\n`;
 // Add test breakdown
 if (testSections.length > 0) {
   testResultsSection += `<details>\n<summary>📋 Test Breakdown</summary>\n\n`;
-  
-  testSections.forEach(section => {
-    const passCount = section.tests.filter(t => t.status === 'pass').length;
-    const failCount = section.tests.filter(t => t.status === 'fail').length;
+
+  testSections.forEach((section) => {
+    const passCount = section.tests.filter((t) => t.status === 'pass').length;
+    const failCount = section.tests.filter((t) => t.status === 'fail').length;
     const icon = failCount === 0 ? '✅' : '❌';
-    
+
     testResultsSection += `\n**${icon} ${section.name}** (${passCount}/${section.tests.length} passed)\n\n`;
-    
-    section.tests.forEach(test => {
+
+    section.tests.forEach((test) => {
       const emoji = test.status === 'pass' ? '✓' : '✗';
       const color = test.status === 'pass' ? '' : '**';
       testResultsSection += `- ${emoji} ${color}${test.name}${color}\n`;
     });
   });
-  
+
   testResultsSection += `\n</details>\n`;
 }
 
@@ -126,11 +132,8 @@ if (startIndex === -1 || endIndex === -1) {
   process.exit(1);
 }
 
-const updatedReadme = 
-  readme.substring(0, startIndex + startMarker.length) +
-  testResultsSection +
-  readme.substring(endIndex);
+const updatedReadme =
+  readme.substring(0, startIndex + startMarker.length) + testResultsSection + readme.substring(endIndex);
 
 fs.writeFileSync(readmePath, updatedReadme);
 console.log('✅ README.md updated with test results');
-

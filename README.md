@@ -27,10 +27,10 @@ npm run coverage
 
 > **Status:** ✅ All Tests Passing  
 > **Tests:** 115 passing  
-> **Duration:** 16s  
+> **Duration:** 8s  
 > **Updated:** 2025-10-26
 
-<details open>
+<details>
 <summary>📋 Test Breakdown</summary>
 
 
