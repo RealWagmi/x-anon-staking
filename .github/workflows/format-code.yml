@@ -24,6 +24,7 @@ jobs:
           cache: 'npm'
 
       - run: npm install
+      - run: cp .env_example .env
       - run: npm run lint:fix
       - run: npm run test
       - name: Auto-commit formatted code
