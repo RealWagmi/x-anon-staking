@@ -1,5 +1,5 @@
 module.exports = {
-  skipFiles: ["mocks/", "interfaces/"],
+  skipFiles: ['mocks/', 'interfaces/'],
   measureStatementCoverage: true,
   measureFunctionCoverage: true,
 };

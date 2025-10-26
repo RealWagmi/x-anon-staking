@@ -16,6 +16,7 @@ interface IxAnonStakingNFT {
     event Mint(
         address indexed user,
         uint256 indexed tokenId,
+        uint256 pid,
         uint256 amount,
         uint256 lockedUntil
     );
@@ -23,12 +24,14 @@ interface IxAnonStakingNFT {
         address indexed caller,
         address indexed to,
         uint256 indexed tokenId,
+        uint256 pid,
         uint256 amount
     );
     event EarnReward(
         address indexed caller,
         address indexed to,
         uint256 indexed tokenId,
+        uint256 pid,
         uint256 reward
     );
     event TopUp(address indexed caller, uint256 indexed poolId, uint256 amount);
@@ -38,35 +41,24 @@ interface IxAnonStakingNFT {
     /// @param amount Staked amount
     /// @param pid Pool id (0=short,1=medium,2=long)
     /// @return tokenId Newly minted position id
-    function mint(
-        uint256 amount,
-        uint256 pid
-    ) external returns (uint256 tokenId);
+    function mint(uint256 amount, uint256 pid) external returns (uint256 tokenId);
 
     /// @notice Burn an unlocked position and withdraw principal
     /// @param to Recipient of returned principal
     /// @param tokenId Position id
     /// @return amount Returned principal amount
-    function burn(
-        address to,
-        uint256 tokenId
-    ) external returns (uint256 amount);
+    function burn(address to, uint256 tokenId) external returns (uint256 amount);
 
     /// @notice Claim rewards for a position
     /// @param to Recipient of rewards
     /// @param tokenId Position id
     /// @return reward Amount paid
-    function earnReward(
-        address to,
-        uint256 tokenId
-    ) external returns (uint256 reward);
+    function earnReward(address to, uint256 tokenId) external returns (uint256 reward);
 
     /// @notice View pending rewards for a position if claimed now
     /// @param tokenId Position id
     /// @return pending Estimated rewards
-    function pendingRewards(
-        uint256 tokenId
-    ) external view returns (uint256 pending);
+    function pendingRewards(uint256 tokenId) external view returns (uint256 pending);
 
     /// @notice Add rewards split by fixed 20/30/50 across pools
     /// @param amount Total reward to add
@@ -101,18 +93,15 @@ interface IxAnonStakingNFT {
     /// @param token ERC20 token address
     /// @param to Recipient
     /// @param amount Amount to transfer
-    function rescueTokens(
-        address token,
-        address to,
-        uint256 amount
-    ) external returns (bool);
+    function rescueTokens(address token, address to, uint256 amount) external returns (bool);
 
     /// @notice Get stored position data
     /// @param tokenId Position id
     /// @return position StakingPosition view struct
+    /// @return pendingRewards Pending rewards
     function positionOf(
         uint256 tokenId
-    ) external view returns (PositionData memory position);
+    ) external view returns (PositionData memory position, uint256 pendingRewards);
 
     /// @notice Get a specific reward snapshot for a pool
     /// @param pid Pool id

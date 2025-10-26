@@ -1,52 +1,35 @@
-import { expect } from "chai";
-import { ethers } from "hardhat";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
-import type {
-  MockERC20,
-  XAnonStakingNFT,
-  MockDescriptor,
-} from "../typechain-types";
+import { expect } from 'chai';
+import { ethers } from 'hardhat';
+import { time } from '@nomicfoundation/hardhat-network-helpers';
+import type { MockERC20, XAnonStakingNFT, MockDescriptor } from '../typechain-types';
 
-describe("Security Tests - Attack Vectors", function () {
+describe('Security Tests - Attack Vectors', function () {
   const DAY = 24 * 60 * 60;
-
   async function deployFixture() {
     const [owner, alice, bob, attacker] = await ethers.getSigners();
 
-    const MockERC20F = await ethers.getContractFactory("MockERC20");
-    const anon = (await MockERC20F.deploy(
-      "ANON",
-      "ANON",
-      18
-    )) as unknown as MockERC20;
-    const MockDescriptorF = await ethers.getContractFactory("MockDescriptor");
+    const MockERC20F = await ethers.getContractFactory('MockERC20');
+    const anon = (await MockERC20F.deploy('ANON', 'ANON', 18)) as unknown as MockERC20;
+    const MockDescriptorF = await ethers.getContractFactory('MockDescriptor');
     const desc = (await MockDescriptorF.deploy()) as unknown as MockDescriptor;
 
-    const XAnonSF = await ethers.getContractFactory("xAnonStakingNFT");
+    const XAnonSF = await ethers.getContractFactory('xAnonStakingNFT');
     const xanonS = (await XAnonSF.deploy(
       await anon.getAddress(),
-      await desc.getAddress()
+      await desc.getAddress(),
     )) as unknown as XAnonStakingNFT;
 
     // Mint tokens to all participants
-    await anon.mint(owner.address, ethers.parseEther("10000000"));
-    await anon.mint(alice.address, ethers.parseEther("10000000"));
-    await anon.mint(bob.address, ethers.parseEther("10000000"));
-    await anon.mint(attacker.address, ethers.parseEther("10000000"));
+    await anon.mint(owner.address, ethers.parseEther('10000000'));
+    await anon.mint(alice.address, ethers.parseEther('10000000'));
+    await anon.mint(bob.address, ethers.parseEther('10000000'));
+    await anon.mint(attacker.address, ethers.parseEther('10000000'));
 
     // Approve contract
-    await anon
-      .connect(alice)
-      .approve(await xanonS.getAddress(), ethers.MaxUint256);
-    await anon
-      .connect(bob)
-      .approve(await xanonS.getAddress(), ethers.MaxUint256);
-    await anon
-      .connect(owner)
-      .approve(await xanonS.getAddress(), ethers.MaxUint256);
-    await anon
-      .connect(attacker)
-      .approve(await xanonS.getAddress(), ethers.MaxUint256);
+    await anon.connect(alice).approve(await xanonS.getAddress(), ethers.MaxUint256);
+    await anon.connect(bob).approve(await xanonS.getAddress(), ethers.MaxUint256);
+    await anon.connect(owner).approve(await xanonS.getAddress(), ethers.MaxUint256);
+    await anon.connect(attacker).approve(await xanonS.getAddress(), ethers.MaxUint256);
 
     return { owner, alice, bob, attacker, anon, xanonS } as {
       owner: any;
@@ -67,7 +50,7 @@ describe("Security Tests - Attack Vectors", function () {
     xanonS: any,
     poolId: number,
     topUpAmount: bigint,
-    activePoolIds: number[] = [0, 1, 2] // Default: all pools active
+    activePoolIds: number[] = [0, 1, 2], // Default: all pools active
   ): Promise<bigint> {
     // If pool is not active, it gets nothing
     if (!activePoolIds.includes(poolId)) {
@@ -114,30 +97,31 @@ describe("Security Tests - Attack Vectors", function () {
     return Number(lockDays);
   }
 
-  describe("ATTACK: Double Reward Claiming", function () {
-    it("should prevent claiming same rewards twice in same block", async function () {
+  describe('ATTACK: Double Reward Claiming', function () {
+    it('should prevent claiming same rewards twice in same block', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // First claim succeeds
       await xanonS.connect(alice).earnReward(alice.address, 1);
 
       // Second immediate claim should revert (no new rewards)
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
 
-    it("should prevent claiming rewards after burn", async function () {
+    it('should prevent claiming rewards after burn', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 0);
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
 
       const lockDays = await getLockDays(xanonS, 0);
       await increaseSeconds(lockDays * DAY); // Wait for unlock
@@ -146,34 +130,37 @@ describe("Security Tests - Attack Vectors", function () {
       await xanonS.connect(alice).burn(alice.address, 1);
 
       // Cannot claim after burn (token doesn't exist)
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "TokenDoesNotExist");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'TokenDoesNotExist',
+      );
     });
 
-    it("should prevent multiple claims before topUp creates interval", async function () {
+    it('should prevent multiple claims before topUp creates interval', async function () {
       const { alice, xanonS } = await deployFixture();
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(5 * DAY);
 
       // No topUp yet = no rewards
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
 
       // Still no rewards on second attempt
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
 
-    it("should prevent claiming more than actual rewards accumulated", async function () {
+    it('should prevent claiming more than actual rewards accumulated', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       const balanceBefore = await anon.balanceOf(alice.address);
@@ -185,20 +172,18 @@ describe("Security Tests - Attack Vectors", function () {
       const received = balanceAfter - balanceBefore;
 
       // Should receive ~1000 (pool 2 gets 100% due to empty pool redistribution)
-      expect(received).to.be.closeTo(
-        ethers.parseEther("1000"),
-        ethers.parseEther("1")
-      );
+      expect(received).to.be.closeTo(ethers.parseEther('1000'), ethers.parseEther('1'));
 
       // Second claim should fail
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
   });
 
-  describe("ATTACK: Front-Running TopUp", function () {
-    it("should give ZERO rewards to front-runner (no stake-days accumulated)", async function () {
+  describe('ATTACK: Front-Running TopUp', function () {
+    it('should give ZERO rewards to front-runner (no stake-days accumulated)', async function () {
       const { owner, alice, attacker, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -217,14 +202,14 @@ describe("Security Tests - Attack Vectors", function () {
       // Note: Changed from 30 to 10 days to work with shorter LOCK_DAYS (16 days for pool2)
 
       // Alice stakes early
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(10 * DAY); // Alice accumulates 10 days (within LOCK_DAYS)
 
       // Attacker front-runs topUp (stakes same block)
-      await xanonS.connect(attacker).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(attacker).mint(ethers.parseEther('100'), 2);
 
       // TopUp happens
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Alice should get ALL rewards (10 days stake-days)
@@ -238,21 +223,19 @@ describe("Security Tests - Attack Vectors", function () {
       const expectedAlloc = await getPoolAllocation(
         xanonS,
         2,
-        ethers.parseEther("1000"),
-        [2] // Only pool2 is active
+        ethers.parseEther('1000'),
+        [2], // Only pool2 is active
       );
-      expect(aliceRewards).to.be.closeTo(
-        expectedAlloc,
-        ethers.parseEther("10")
-      );
+      expect(aliceRewards).to.be.closeTo(expectedAlloc, ethers.parseEther('10'));
 
       // Attacker: 0 stake-days → gets NOTHING (reverts with NoRewards)
-      await expect(
-        xanonS.connect(attacker).earnReward(attacker.address, 2)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(attacker).earnReward(attacker.address, 2)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
 
-    it("should protect against just-in-time staking before topUp", async function () {
+    it('should protect against just-in-time staking before topUp', async function () {
       const { owner, alice, attacker, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -269,14 +252,14 @@ describe("Security Tests - Attack Vectors", function () {
       // Proves: Amount doesn't matter, only accumulated TIME matters
 
       // Alice stakes day 0
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(10 * DAY);
 
       // Attacker stakes 1 block before topUp
-      await xanonS.connect(attacker).mint(ethers.parseEther("1000"), 2); // 10x more!
+      await xanonS.connect(attacker).mint(ethers.parseEther('1000'), 2); // 10x more!
 
       // TopUp same block
-      await xanonS.connect(owner).topUp(ethers.parseEther("10000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('10000'));
       await increaseSeconds(DAY);
 
       const alicePending = await xanonS.pendingRewards(1);
@@ -290,8 +273,8 @@ describe("Security Tests - Attack Vectors", function () {
     });
   });
 
-  describe("ATTACK: Multiple Small Stakes vs Single Large", function () {
-    it("should give SAME rewards for 100x1 vs 1x100 stakes (no fragmentation advantage)", async function () {
+  describe('ATTACK: Multiple Small Stakes vs Single Large', function () {
+    it('should give SAME rewards for 100x1 vs 1x100 stakes (no fragmentation advantage)', async function () {
       const { owner, alice, bob, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -309,14 +292,14 @@ describe("Security Tests - Attack Vectors", function () {
 
       // Alice: 100 positions of 1 token
       for (let i = 0; i < 100; i++) {
-        await xanonS.connect(alice).mint(ethers.parseEther("1"), 2);
+        await xanonS.connect(alice).mint(ethers.parseEther('1'), 2);
       }
 
       // Bob: 1 position of 100 tokens
-      await xanonS.connect(bob).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther('100'), 2);
 
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("10000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('10000'));
       await increaseSeconds(DAY);
 
       // Claim all Alice's positions
@@ -335,35 +318,30 @@ describe("Security Tests - Attack Vectors", function () {
       const bobRewards = bobBalAfter - bobBalBefore;
 
       // Should be equal (both have 100 tokens * 10 days = 1000 stake-days)
-      expect(aliceTotalRewards).to.be.closeTo(
-        bobRewards,
-        ethers.parseEther("0.001")
-      );
+      expect(aliceTotalRewards).to.be.closeTo(bobRewards, ethers.parseEther('0.001'));
     });
 
-    it("should handle gas griefing: many positions should not break contract", async function () {
+    it('should handle gas griefing: many positions should not break contract', async function () {
       const { owner, attacker, xanonS } = await deployFixture();
 
       // Create 50 tiny positions (gas griefing attempt)
       for (let i = 0; i < 50; i++) {
-        await xanonS.connect(attacker).mint(ethers.parseEther("1"), 0);
+        await xanonS.connect(attacker).mint(ethers.parseEther('1'), 0);
       }
 
       await increaseSeconds(2 * DAY);
 
       // TopUp should still work despite many positions
-      await expect(xanonS.connect(owner).topUp(ethers.parseEther("1000"))).to
-        .not.be.reverted;
+      await expect(xanonS.connect(owner).topUp(ethers.parseEther('1000'))).to.not.be.reverted;
 
       // Claims should work
       await increaseSeconds(DAY);
-      await expect(xanonS.connect(attacker).earnReward(attacker.address, 1)).to
-        .not.be.reverted;
+      await expect(xanonS.connect(attacker).earnReward(attacker.address, 1)).to.not.be.reverted;
     });
   });
 
-  describe("ATTACK: Reward Timing Manipulation", function () {
-    it("should prevent earning rewards from future topUps after expiration", async function () {
+  describe('ATTACK: Reward Timing Manipulation', function () {
+    it('should prevent earning rewards from future topUps after expiration', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -384,11 +362,11 @@ describe("Security Tests - Attack Vectors", function () {
       // This is CORRECT behavior - she earned during both intervals, just capped at expiry
 
       const poolId = 0;
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), poolId);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), poolId);
       await increaseSeconds(2 * DAY);
 
       // First topUp (Alice active)
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Wait for expiration
@@ -396,7 +374,7 @@ describe("Security Tests - Attack Vectors", function () {
       await increaseSeconds(lockDays * DAY);
 
       // Second topUp (creates snapshot for period including Alice's active days)
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Claim rewards
@@ -407,21 +385,13 @@ describe("Security Tests - Attack Vectors", function () {
 
       // Alice gets rewards from both topUps for her active period
       // Each topUp gives 100% to pool0 (only active pool)
-      const allocationPerTopUp = await getPoolAllocation(
-        xanonS,
-        poolId,
-        ethers.parseEther("1000"),
-        [0]
-      );
+      const allocationPerTopUp = await getPoolAllocation(xanonS, poolId, ethers.parseEther('1000'), [0]);
 
       // Alice should get close to 2× allocation (from both intervals)
-      expect(rewards).to.be.closeTo(
-        allocationPerTopUp * 2n,
-        ethers.parseEther("50")
-      );
+      expect(rewards).to.be.closeTo(allocationPerTopUp * 2n, ethers.parseEther('50'));
     });
 
-    it("should handle claim-topUp-claim pattern correctly", async function () {
+    it('should handle claim-topUp-claim pattern correctly', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -440,11 +410,11 @@ describe("Security Tests - Attack Vectors", function () {
       // - Second claim: ~500 (pool2 from topUp#2)
       // - Total: ~1000 (proves no double-spend)
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(5 * DAY);
 
       // First topUp
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // First claim
@@ -456,7 +426,7 @@ describe("Security Tests - Attack Vectors", function () {
       await increaseSeconds(5 * DAY);
 
       // Second topUp
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Second claim
@@ -469,57 +439,50 @@ describe("Security Tests - Attack Vectors", function () {
       const expectedPerTopUp = await getPoolAllocation(
         xanonS,
         2,
-        ethers.parseEther("1000"),
-        [2] // Only pool2 active
+        ethers.parseEther('1000'),
+        [2], // Only pool2 active
       );
-      expect(firstClaim).to.be.closeTo(
-        expectedPerTopUp,
-        ethers.parseEther("10")
-      );
-      expect(secondClaim).to.be.closeTo(
-        expectedPerTopUp,
-        ethers.parseEther("10")
-      );
+      expect(firstClaim).to.be.closeTo(expectedPerTopUp, ethers.parseEther('10'));
+      expect(secondClaim).to.be.closeTo(expectedPerTopUp, ethers.parseEther('10'));
 
       // Total should be ~2000, NOT more (no double-spend)
-      expect(firstClaim + secondClaim).to.be.closeTo(
-        expectedPerTopUp * 2n,
-        ethers.parseEther("20")
-      );
+      expect(firstClaim + secondClaim).to.be.closeTo(expectedPerTopUp * 2n, ethers.parseEther('20'));
     });
 
-    it("should prevent claiming same interval multiple times", async function () {
+    it('should prevent claiming same interval multiple times', async function () {
       const { owner, alice, xanonS } = await deployFixture();
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
 
       // Claim multiple times in same day
       await increaseSeconds(DAY);
       await xanonS.connect(alice).earnReward(alice.address, 1);
 
       // Second claim same day should fail
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
 
       // Third attempt should also fail
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
   });
 
-  describe("ATTACK: Principal Protection Bypass", function () {
-    it("should prevent withdrawing more than deposited", async function () {
+  describe('ATTACK: Principal Protection Bypass', function () {
+    it('should prevent withdrawing more than deposited', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
-      const depositAmount = ethers.parseEther("100");
+      const depositAmount = ethers.parseEther('100');
       await xanonS.connect(alice).mint(depositAmount, 0);
 
       await increaseSeconds(2 * DAY);
-      const topUpAmount = ethers.parseEther("1000");
+      const topUpAmount = ethers.parseEther('1000');
       await xanonS.connect(owner).topUp(topUpAmount);
 
       const lockDays = await getLockDays(xanonS, 0);
@@ -534,15 +497,10 @@ describe("Security Tests - Attack Vectors", function () {
       const totalReceived = balanceAfter - balanceBefore;
 
       // Get expected pool0 allocation dynamically
-      const expectedRewards = await getPoolAllocation(xanonS, 0, topUpAmount, [
-        0,
-      ]);
+      const expectedRewards = await getPoolAllocation(xanonS, 0, topUpAmount, [0]);
 
       // Should receive principal + rewards
-      expect(totalReceived).to.be.closeTo(
-        depositAmount + expectedRewards,
-        ethers.parseEther("10")
-      );
+      expect(totalReceived).to.be.closeTo(depositAmount + expectedRewards, ethers.parseEther('10'));
 
       // Contract should maintain totalStaked integrity
       const totalStaked = await xanonS.totalStaked();
@@ -552,19 +510,19 @@ describe("Security Tests - Attack Vectors", function () {
       expect(contractBalance).to.be.gte(totalStaked);
     });
 
-    it("should prevent stealing through reward calculation overflow", async function () {
+    it('should prevent stealing through reward calculation overflow', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       const initialBalance = await anon.balanceOf(alice.address);
 
       // Maximum allowed stake
-      const maxStake = ethers.parseEther("79228162514"); // near uint96 max
+      const maxStake = ethers.parseEther('79228162514'); // near uint96 max
       await anon.mint(alice.address, maxStake);
       await anon.connect(alice).approve(await xanonS.getAddress(), maxStake);
 
       await xanonS.connect(alice).mint(maxStake, 0);
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Should not overflow or steal more than rewards
@@ -579,50 +537,50 @@ describe("Security Tests - Attack Vectors", function () {
       const pool0Alloc = await getPoolAllocation(
         xanonS,
         0,
-        ethers.parseEther("1000"),
-        [0] // Only pool0 active
+        ethers.parseEther('1000'),
+        [0], // Only pool0 active
       );
       expect(paidOut).to.be.lte(pool0Alloc);
 
       // Alice is only staker, should get close to full allocation (100% of 1000)
-      expect(paidOut).to.be.closeTo(pool0Alloc, ethers.parseEther("1"));
+      expect(paidOut).to.be.closeTo(pool0Alloc, ethers.parseEther('1'));
     });
   });
 
-  describe("ATTACK: Ring Buffer Manipulation", function () {
-    it("should correctly handle stakes at bucket boundaries", async function () {
+  describe('ATTACK: Ring Buffer Manipulation', function () {
+    it('should correctly handle stakes at bucket boundaries', async function () {
       const { owner, alice, bob, xanonS } = await deployFixture();
 
       // Pool 0 ring buffer
       const poolId = 0;
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), poolId);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), poolId);
 
       // Advance exactly to boundary
       const lockDays = await getLockDays(xanonS, poolId);
       await increaseSeconds(lockDays * DAY);
 
       // Bob stakes at boundary
-      await xanonS.connect(bob).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(bob).mint(ethers.parseEther('100'), 0);
 
       // Verify Alice's position expired
       const [, , rollingStake] = await xanonS.poolInfo(0);
-      expect(rollingStake).to.equal(ethers.parseEther("100")); // Only Bob
+      expect(rollingStake).to.equal(ethers.parseEther('100')); // Only Bob
     });
 
-    it("should prevent manipulation through rapid stake/unstake at bucket edge", async function () {
+    it('should prevent manipulation through rapid stake/unstake at bucket edge', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 0);
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
 
       // Advance to near expiration
       await increaseSeconds(89 * DAY);
 
       // Try to manipulate by creating new positions near expiration
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 0);
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Verify proper accounting (no double counting)
@@ -636,18 +594,13 @@ describe("Security Tests - Attack Vectors", function () {
       // Combined should not exceed pool allocations (pool0 is only active pool)
       // 2 topUps × 100% (empty pool redistribution) = 2000
       const totalPending = pending1 + pending2;
-      const expectedMax = await getPoolAllocation(
-        xanonS,
-        0,
-        ethers.parseEther("1000"),
-        [0]
-      );
+      const expectedMax = await getPoolAllocation(xanonS, 0, ethers.parseEther('1000'), [0]);
       expect(totalPending).to.be.lte(expectedMax * 2n); // 2 topUps
     });
   });
 
-  describe("ATTACK: Snapshot Boundary Exploits", function () {
-    it("should prevent claiming from unearned snapshots", async function () {
+  describe('ATTACK: Snapshot Boundary Exploits', function () {
+    it('should prevent claiming from unearned snapshots', async function () {
       const { owner, alice, bob, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -671,17 +624,17 @@ describe("Security Tests - Attack Vectors", function () {
       // Ratio: ~3.2:1 (Alice has >2x more)
 
       // Alice stakes and gets first topUp
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
 
       // Bob stakes AFTER topUp
       await increaseSeconds(DAY);
-      await xanonS.connect(bob).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther('100'), 2);
 
       // Second topUp
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Alice should get full first topUp + ~half of second
@@ -700,19 +653,11 @@ describe("Security Tests - Attack Vectors", function () {
       expect(aliceRewards).to.be.gt(bobRewards * 2n);
 
       // Total should not exceed 2000 (2 topUps × 100% pool2, since pool2 is only active pool)
-      const expectedTotal = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
-      expect(aliceRewards + bobRewards).to.be.closeTo(
-        expectedTotal * 2n,
-        ethers.parseEther("20")
-      );
+      const expectedTotal = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
+      expect(aliceRewards + bobRewards).to.be.closeTo(expectedTotal * 2n, ethers.parseEther('20'));
     });
 
-    it("should handle claims spanning multiple snapshots correctly", async function () {
+    it('should handle claims spanning multiple snapshots correctly', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -731,16 +676,14 @@ describe("Security Tests - Attack Vectors", function () {
       //
       // Note: Changed from 10-day to 3-day intervals to work with shorter LOCK_DAYS (16 days for pool2)
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
 
       // Create 5 snapshots with 3-day intervals (within LOCK_DAYS=16)
       const startTs = BigInt(await time.latest());
       const intervals = [2, 5, 8, 11, 14]; // Days when topUp happens
       for (let i = 0; i < 5; i++) {
-        await time.setNextBlockTimestamp(
-          startTs + BigInt(intervals[i]) * BigInt(DAY)
-        );
-        await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+        await time.setNextBlockTimestamp(startTs + BigInt(intervals[i]) * BigInt(DAY));
+        await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       }
 
       await time.setNextBlockTimestamp(startTs + 15n * BigInt(DAY));
@@ -752,47 +695,39 @@ describe("Security Tests - Attack Vectors", function () {
       const rewards = balAfter - balBefore;
 
       // Should get 5 × 1000 = 5000 (pool2 is only active pool, gets 100% of each topUp)
-      const expectedPerTopUp = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
-      expect(rewards).to.be.closeTo(
-        expectedPerTopUp * 5n,
-        ethers.parseEther("50")
-      );
+      const expectedPerTopUp = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
+      expect(rewards).to.be.closeTo(expectedPerTopUp * 5n, ethers.parseEther('50'));
 
       // Second claim should fail
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
   });
 
-  describe("ATTACK: Reentrancy and Race Conditions", function () {
-    it("should be protected by nonReentrant on earnReward", async function () {
+  describe('ATTACK: Reentrancy and Race Conditions', function () {
+    it('should be protected by nonReentrant on earnReward', async function () {
       // Note: Proper reentrancy test would need a malicious contract
       // This test verifies the modifier is present
       const { owner, alice, xanonS } = await deployFixture();
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // ReentrancyGuard will prevent re-entry via token callback
-      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.not.be
-        .reverted;
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.not.be.reverted;
     });
 
-    it("should handle concurrent claims from different users safely", async function () {
+    it('should handle concurrent claims from different users safely', async function () {
       const { owner, alice, bob, anon, xanonS } = await deployFixture();
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
-      await xanonS.connect(bob).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Both claim in quick succession
@@ -806,30 +741,17 @@ describe("Security Tests - Attack Vectors", function () {
       const bobBal = await anon.balanceOf(bob.address);
 
       // Both should have received ~500 each (50/50 split of pool2's 1000, since pool2 is only active)
-      const aliceGain =
-        aliceBal - (ethers.parseEther("10000000") - ethers.parseEther("100"));
-      const bobGain =
-        bobBal - (ethers.parseEther("10000000") - ethers.parseEther("100"));
+      const aliceGain = aliceBal - (ethers.parseEther('10000000') - ethers.parseEther('100'));
+      const bobGain = bobBal - (ethers.parseEther('10000000') - ethers.parseEther('100'));
 
-      const expectedPerUser = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
-      expect(aliceGain).to.be.closeTo(
-        expectedPerUser / 2n,
-        ethers.parseEther("10")
-      );
-      expect(bobGain).to.be.closeTo(
-        expectedPerUser / 2n,
-        ethers.parseEther("10")
-      );
+      const expectedPerUser = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
+      expect(aliceGain).to.be.closeTo(expectedPerUser / 2n, ethers.parseEther('10'));
+      expect(bobGain).to.be.closeTo(expectedPerUser / 2n, ethers.parseEther('10'));
     });
   });
 
-  describe("EDGE CASE: Zero and Boundary Values", function () {
-    it("should not allow topUp when no active stakes exist", async function () {
+  describe('EDGE CASE: Zero and Boundary Values', function () {
+    it('should not allow topUp when no active stakes exist', async function () {
       const { owner, xanonS } = await deployFixture();
 
       // CRITICAL CONTRACT BEHAVIOR:
@@ -838,12 +760,13 @@ describe("Security Tests - Attack Vectors", function () {
       //
       // Expected: topUp should fail with NoActiveStake error
 
-      await expect(
-        xanonS.connect(owner).topUp(ethers.parseEther("1000"))
-      ).to.be.revertedWithCustomError(xanonS, "NoActiveStake");
+      await expect(xanonS.connect(owner).topUp(ethers.parseEther('1000'))).to.be.revertedWithCustomError(
+        xanonS,
+        'NoActiveStake',
+      );
     });
 
-    it("CRITICAL: rewards are distributed fairly when users join at different times", async function () {
+    it('CRITICAL: rewards are distributed fairly when users join at different times', async function () {
       const { owner, alice, bob, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -861,19 +784,19 @@ describe("Security Tests - Attack Vectors", function () {
       // Total: Alice ~1500, Bob ~500
 
       // Alice stakes first
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(5 * DAY);
 
       // First topUp (only Alice has stake-days)
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Bob joins AFTER first topUp
-      await xanonS.connect(bob).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(4 * DAY);
 
       // Second topUp (both have stake-days now)
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Both claim
@@ -891,26 +814,18 @@ describe("Security Tests - Attack Vectors", function () {
       expect(aliceRewards).to.be.gt(bobRewards);
 
       // Total should be close to 2000 (2 topUps × 1000)
-      const expectedTotal = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
-      expect(aliceRewards + bobRewards).to.be.closeTo(
-        expectedTotal * 2n,
-        ethers.parseEther("20")
-      );
+      const expectedTotal = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
+      expect(aliceRewards + bobRewards).to.be.closeTo(expectedTotal * 2n, ethers.parseEther('20'));
     });
 
-    it("should handle minimum stake correctly", async function () {
+    it('should handle minimum stake correctly', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       const minAmount = await xanonS.MIN_AMOUNT();
       await xanonS.connect(alice).mint(minAmount, 2);
 
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("10000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('10000'));
       await increaseSeconds(DAY);
 
       // Should receive proportional rewards
@@ -919,15 +834,15 @@ describe("Security Tests - Attack Vectors", function () {
     });
   });
 
-  describe("ATTACK: Burn and Re-stake Manipulation", function () {
-    it("should prevent earning old rewards after burn and re-stake", async function () {
+  describe('ATTACK: Burn and Re-stake Manipulation', function () {
+    it('should prevent earning old rewards after burn and re-stake', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // Test designed for original pool0 params (91 days, 20%)
       const lockDays = await getLockDays(xanonS, 0);
       const [allocPoint] = await xanonS.poolInfo(0);
       if (lockDays !== 91 || Number(allocPoint) !== 2000) {
-        console.log("Test skipped: Pool 0 params changed");
+        console.log('Test skipped: Pool 0 params changed');
         return;
       }
 
@@ -954,9 +869,9 @@ describe("Security Tests - Attack Vectors", function () {
       // - Total: 400 (CORRECT BEHAVIOR!)
 
       // First stake
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 0);
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Burn position (claims rewards)
@@ -965,15 +880,15 @@ describe("Security Tests - Attack Vectors", function () {
       const bal1 = await anon.balanceOf(alice.address);
       await xanonS.connect(alice).burn(alice.address, 1);
       const bal2 = await anon.balanceOf(alice.address);
-      const firstRewards = bal2 - bal1 - ethers.parseEther("100"); // Subtract principal
+      const firstRewards = bal2 - bal1 - ethers.parseEther('100'); // Subtract principal
 
       // Re-stake with new position (must do BEFORE topUp to avoid NoActiveStake)
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 0);
       await increaseSeconds(10 * DAY);
 
       // Second topUp (Alice has accumulated stake-days)
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Claim from new position
@@ -983,15 +898,10 @@ describe("Security Tests - Attack Vectors", function () {
       const secondRewards = bal4 - bal3;
 
       // Get expected allocations dynamically (pool0 is only active pool)
-      const pool0Alloc = await getPoolAllocation(
-        xanonS,
-        0,
-        ethers.parseEther("1000"),
-        [0]
-      );
+      const pool0Alloc = await getPoolAllocation(xanonS, 0, ethers.parseEther('1000'), [0]);
 
       // First position got rewards from first topUp
-      expect(firstRewards).to.be.closeTo(pool0Alloc, ethers.parseEther("20"));
+      expect(firstRewards).to.be.closeTo(pool0Alloc, ethers.parseEther('20'));
 
       // Second position gets DILUTED rewards due to ghost stake-days
       // Between first topUp (day 10) and burn (day 102), Alice accumulated 92 days of stake-days
@@ -1009,8 +919,8 @@ describe("Security Tests - Attack Vectors", function () {
     });
   });
 
-  describe("ATTACK: Multiple Earnreward Scenarios", function () {
-    it("should allow earnReward on topUp day if stake-days accumulated", async function () {
+  describe('ATTACK: Multiple Earnreward Scenarios', function () {
+    it('should allow earnReward on topUp day if stake-days accumulated', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -1030,11 +940,11 @@ describe("Security Tests - Attack Vectors", function () {
       // EXPECTED: Both claims get ~500 (pool2 allocation)
       // CRITICAL: Can claim on topUp day because stake-days accumulated between claims!
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(5 * DAY);
 
       // First topUp
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // First claim
@@ -1046,7 +956,7 @@ describe("Security Tests - Attack Vectors", function () {
       await increaseSeconds(5 * DAY); // 5 days pass (stake-days accumulate!)
 
       // Second topUp
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
 
       // CORRECT BEHAVIOR: Can claim on topUp day because stake-days accumulated
       // Between first claim (day ~6) and second topUp (day ~11) = 5 days
@@ -1056,23 +966,15 @@ describe("Security Tests - Attack Vectors", function () {
       const earned2 = bal4 - bal3;
 
       // Both earnings should be ~1000 (pool2 gets 100% since it's only active pool)
-      const expectedPerTopUp = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
-      expect(earned1).to.be.closeTo(expectedPerTopUp, ethers.parseEther("10"));
-      expect(earned2).to.be.closeTo(expectedPerTopUp, ethers.parseEther("10"));
+      const expectedPerTopUp = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
+      expect(earned1).to.be.closeTo(expectedPerTopUp, ethers.parseEther('10'));
+      expect(earned2).to.be.closeTo(expectedPerTopUp, ethers.parseEther('10'));
 
       // CRITICAL: Total should be ~2000 (two pool2 allocations), no inflation
-      expect(earned1 + earned2).to.be.closeTo(
-        expectedPerTopUp * 2n,
-        ethers.parseEther("20")
-      );
+      expect(earned1 + earned2).to.be.closeTo(expectedPerTopUp * 2n, ethers.parseEther('20'));
     });
 
-    it("should correctly handle claim on topUp day with accumulated stake-days", async function () {
+    it('should correctly handle claim on topUp day with accumulated stake-days', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -1095,11 +997,11 @@ describe("Security Tests - Attack Vectors", function () {
       //
       // Tests: Can claim on topUp day if stake-days exist before topUp
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(2 * DAY);
 
       // First topUp creates snapshot at day 2
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
 
       // First claim succeeds (has 2 days stake-days)
       const balBefore = await anon.balanceOf(alice.address);
@@ -1107,31 +1009,24 @@ describe("Security Tests - Attack Vectors", function () {
       const balAfter = await anon.balanceOf(alice.address);
 
       // Alice gets 100% of topUp (pool2 is only active pool)
-      const expectedReward = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
-      expect(balAfter - balBefore).to.be.closeTo(
-        expectedReward,
-        ethers.parseEther("10")
-      );
+      const expectedReward = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
+      expect(balAfter - balBefore).to.be.closeTo(expectedReward, ethers.parseEther('10'));
 
       // Second immediate claim fails (no new stake-days)
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
 
-    it("should prevent reward inflation through stake-unstake-restake cycle", async function () {
+    it('should prevent reward inflation through stake-unstake-restake cycle', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // Test designed for original pool0 params (91 days, 20%)
       const lockDays = await getLockDays(xanonS, 0);
       const [allocPoint] = await xanonS.poolInfo(0);
       if (lockDays !== 91 || Number(allocPoint) !== 2000) {
-        console.log("Test skipped: Pool 0 params changed");
+        console.log('Test skipped: Pool 0 params changed');
         return;
       }
 
@@ -1159,9 +1054,9 @@ describe("Security Tests - Attack Vectors", function () {
       const initialBalance = await anon.balanceOf(alice.address);
 
       // Stake
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 0);
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
 
       // Wait for unlock and burn
       const lockDays1 = await getLockDays(xanonS, 0);
@@ -1172,9 +1067,9 @@ describe("Security Tests - Attack Vectors", function () {
       const netGainFirst = balanceAfterFirst - initialBalance; // Principal + rewards
 
       // Re-stake immediately
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 0);
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       const lockDays2 = await getLockDays(xanonS, 0);
       await increaseSeconds(lockDays2 * DAY);
       await xanonS.connect(alice).burn(alice.address, 2);
@@ -1183,22 +1078,17 @@ describe("Security Tests - Attack Vectors", function () {
       const netGainSecond = finalBalance - balanceAfterFirst; // Principal + rewards
 
       // Get expected allocation from contract (pool0 is only active pool)
-      const pool0Alloc = await getPoolAllocation(
-        xanonS,
-        0,
-        ethers.parseEther("1000"),
-        [0]
-      );
+      const pool0Alloc = await getPoolAllocation(xanonS, 0, ethers.parseEther('1000'), [0]);
 
       // First cycle: Alice gets ~full allocation from topUp #1
       // Second cycle: Alice gets DILUTED rewards due to ghost stake-days from first cycle
       // This is similar to the burn/re-stake test - ghost stake-days dilute future rewards
 
       // Net gain first includes principal (100) + rewards (~1000)
-      expect(netGainFirst).to.be.gt(ethers.parseEther("100")); // At least principal
+      expect(netGainFirst).to.be.gt(ethers.parseEther('100')); // At least principal
 
       // Net gain second includes principal (100) + diluted rewards (~100)
-      expect(netGainSecond).to.be.gt(ethers.parseEther("100")); // At least principal
+      expect(netGainSecond).to.be.gt(ethers.parseEther('100')); // At least principal
 
       // CRITICAL: Total net gain (rewards only, principal cycles out)
       const totalGain = finalBalance - initialBalance;
@@ -1208,7 +1098,7 @@ describe("Security Tests - Attack Vectors", function () {
       expect(totalGain).to.be.lt(pool0Alloc * 2n); // Less than 2 allocations (due to dilution)
     });
 
-    it("should handle multiple earnRewards with intermediate topUps", async function () {
+    it('should handle multiple earnRewards with intermediate topUps', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -1230,14 +1120,14 @@ describe("Security Tests - Attack Vectors", function () {
       //
       // Tests: Multiple claim cycles work correctly, no inflation
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
 
       let totalClaimed = 0n;
 
       // Do 5 cycles: topUp → wait → earnReward
       for (let i = 0; i < 5; i++) {
         await increaseSeconds(3 * DAY);
-        await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+        await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
         await increaseSeconds(DAY);
 
         const balBefore = await anon.balanceOf(alice.address);
@@ -1247,28 +1137,20 @@ describe("Security Tests - Attack Vectors", function () {
       }
 
       // Total claimed should be 5 × 1000 = 5000 (pool2 gets 100% each time)
-      const expectedPerTopUp = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
-      expect(totalClaimed).to.be.closeTo(
-        expectedPerTopUp * 5n,
-        ethers.parseEther("50")
-      );
+      const expectedPerTopUp = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
+      expect(totalClaimed).to.be.closeTo(expectedPerTopUp * 5n, ethers.parseEther('50'));
 
       // Should not be able to claim more (all intervals claimed)
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
   });
 
-  describe("SECURITY: Total Rewards Invariant", function () {
-    it("CRITICAL: total distributed rewards should NEVER exceed topUp amounts", async function () {
-      const { owner, alice, bob, attacker, anon, xanonS } =
-        await deployFixture();
+  describe('SECURITY: Total Rewards Invariant', function () {
+    it('CRITICAL: total distributed rewards should NEVER exceed topUp amounts', async function () {
+      const { owner, alice, bob, attacker, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
       // Day 0:  Alice stakes 100
@@ -1292,17 +1174,17 @@ describe("Security Tests - Attack Vectors", function () {
       // CRITICAL INVARIANT: totalDistributed ≤ 5,000 (must not exceed!)
 
       // Multiple users stake at different times
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(bob).mint(ethers.parseEther("200"), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther('200'), 2);
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(attacker).mint(ethers.parseEther("300"), 2);
+      await xanonS.connect(attacker).mint(ethers.parseEther('300'), 2);
 
       // Multiple topUps
-      const totalTopUp = ethers.parseEther("5000"); // 5 topUps * 1000
+      const totalTopUp = ethers.parseEther('5000'); // 5 topUps * 1000
       for (let i = 0; i < 5; i++) {
         await increaseSeconds(3 * DAY);
-        await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+        await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       }
 
       await increaseSeconds(5 * DAY);
@@ -1320,16 +1202,10 @@ describe("Security Tests - Attack Vectors", function () {
       await xanonS.connect(attacker).earnReward(attacker.address, 3);
       const attacker2 = await anon.balanceOf(attacker.address);
 
-      const totalDistributed =
-        alice2 - alice1 + (bob2 - bob1) + (attacker2 - attacker1);
+      const totalDistributed = alice2 - alice1 + (bob2 - bob1) + (attacker2 - attacker1);
 
       // Pool 2 gets 100% of topUps = 5000 (empty pool redistribution)
-      const maxPoolRewards = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
+      const maxPoolRewards = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
 
       // CRITICAL: Must not exceed pool allocation × 5 (hard invariant!)
       expect(totalDistributed).to.be.lte(maxPoolRewards * 5n);
@@ -1337,7 +1213,7 @@ describe("Security Tests - Attack Vectors", function () {
       // Should be close to full allocation (all stake-days utilized)
       expect(totalDistributed).to.be.closeTo(
         maxPoolRewards * 5n,
-        ethers.parseEther("50") // 1% tolerance
+        ethers.parseEther('50'), // 1% tolerance
       );
 
       // Double-check: No individual can have claimed more than total
@@ -1346,7 +1222,7 @@ describe("Security Tests - Attack Vectors", function () {
       expect(attacker2 - attacker1).to.be.lte(maxPoolRewards * 5n);
     });
 
-    it("CRITICAL: contract balance should always cover totalStaked", async function () {
+    it('CRITICAL: contract balance should always cover totalStaked', async function () {
       const { owner, alice, bob, anon, xanonS } = await deployFixture();
 
       // TIMELINE & INVARIANT CHECKS:
@@ -1368,8 +1244,8 @@ describe("Security Tests - Attack Vectors", function () {
       expect(balance).to.be.gte(totalStaked);
 
       // After stakes
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
-      await xanonS.connect(bob).mint(ethers.parseEther("200"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther('200'), 2);
 
       balance = await anon.balanceOf(contractAddress);
       totalStaked = await xanonS.totalStaked();
@@ -1377,7 +1253,7 @@ describe("Security Tests - Attack Vectors", function () {
 
       // After topUp (adds rewards)
       await increaseSeconds(2 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
 
       balance = await anon.balanceOf(contractAddress);
       totalStaked = await xanonS.totalStaked();
@@ -1399,12 +1275,12 @@ describe("Security Tests - Attack Vectors", function () {
       balance = await anon.balanceOf(contractAddress);
       totalStaked = await xanonS.totalStaked();
       expect(balance).to.be.gte(totalStaked); // Now covers 200 principal
-      expect(totalStaked).to.equal(ethers.parseEther("200"));
+      expect(totalStaked).to.equal(ethers.parseEther('200'));
     });
   });
 
-  describe("ATTACK: Precision Loss Exploits", function () {
-    it("should not lose rewards due to rounding with many small claims", async function () {
+  describe('ATTACK: Precision Loss Exploits', function () {
+    it('should not lose rewards due to rounding with many small claims', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -1421,11 +1297,11 @@ describe("Security Tests - Attack Vectors", function () {
 
       // Alice creates many tiny positions
       for (let i = 0; i < 50; i++) {
-        await xanonS.connect(alice).mint(ethers.parseEther("2"), 2);
+        await xanonS.connect(alice).mint(ethers.parseEther('2'), 2);
       }
 
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("10000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('10000'));
       await increaseSeconds(DAY);
 
       // Claim all 50 positions
@@ -1439,25 +1315,17 @@ describe("Security Tests - Attack Vectors", function () {
 
       // Total: 50 * 2 = 100 tokens * 10 days = 1000 stake-days
       // Pool 2 gets 10000 (100%), Alice should get all of it
-      const expectedTotal = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("10000"),
-        [2]
-      );
-      expect(totalClaimed).to.be.closeTo(
-        expectedTotal,
-        ethers.parseEther("10")
-      );
+      const expectedTotal = await getPoolAllocation(xanonS, 2, ethers.parseEther('10000'), [2]);
+      expect(totalClaimed).to.be.closeTo(expectedTotal, ethers.parseEther('10'));
     });
 
-    it("should handle very small perDayRate without underflow", async function () {
+    it('should handle very small perDayRate without underflow', async function () {
       const { owner, alice, xanonS } = await deployFixture();
 
       // Large stake, tiny topUp → very small perDayRate
-      await xanonS.connect(alice).mint(ethers.parseEther("1000000"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('1000000'), 2);
       await increaseSeconds(100 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1")); // Minimal topUp
+      await xanonS.connect(owner).topUp(ethers.parseEther('1')); // Minimal topUp
 
       await increaseSeconds(DAY);
 
@@ -1468,8 +1336,8 @@ describe("Security Tests - Attack Vectors", function () {
     });
   });
 
-  describe("ATTACK: Cross-Pool Manipulation", function () {
-    it("should prevent stealing rewards from other pools", async function () {
+  describe('ATTACK: Cross-Pool Manipulation', function () {
+    it('should prevent stealing rewards from other pools', async function () {
       const { owner, alice, bob, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -1490,13 +1358,13 @@ describe("Security Tests - Attack Vectors", function () {
       // Tests: Pools are completely isolated, no cross-stealing possible
 
       // Alice stakes in pool 2
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
 
       // Bob stakes in pool 0
-      await xanonS.connect(bob).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(bob).mint(ethers.parseEther('100'), 0);
 
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("10000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('10000'));
       await increaseSeconds(DAY);
 
       const aliceBal1 = await anon.balanceOf(alice.address);
@@ -1513,19 +1381,19 @@ describe("Security Tests - Attack Vectors", function () {
       const pool2Alloc = await getPoolAllocation(
         xanonS,
         2,
-        ethers.parseEther("10000"),
-        [0, 2] // pool0 and pool2 active
+        ethers.parseEther('10000'),
+        [0, 2], // pool0 and pool2 active
       );
       const pool0Alloc = await getPoolAllocation(
         xanonS,
         0,
-        ethers.parseEther("10000"),
-        [0, 2] // pool0 and pool2 active
+        ethers.parseEther('10000'),
+        [0, 2], // pool0 and pool2 active
       );
 
-      expect(aliceRewards).to.be.closeTo(pool2Alloc, ethers.parseEther("10"));
+      expect(aliceRewards).to.be.closeTo(pool2Alloc, ethers.parseEther('10'));
 
-      expect(bobRewards).to.be.closeTo(pool0Alloc, ethers.parseEther("10"));
+      expect(bobRewards).to.be.closeTo(pool0Alloc, ethers.parseEther('10'));
 
       // Ratio should match pool allocations
       const expectedRatio = (pool2Alloc * 100n) / pool0Alloc;
@@ -1533,17 +1401,17 @@ describe("Security Tests - Attack Vectors", function () {
       expect(actualRatio).to.be.closeTo(expectedRatio, 10n);
     });
 
-    it("should prevent cross-contamination between pool intervals", async function () {
+    it('should prevent cross-contamination between pool intervals', async function () {
       const { owner, alice, bob, anon, xanonS } = await deployFixture();
 
       // Pool 0: Alice (expires day 91)
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 0);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 0);
 
       // Pool 2: Bob (expires day 365)
-      await xanonS.connect(bob).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther('100'), 2);
 
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Both claim from first topUp
@@ -1554,7 +1422,7 @@ describe("Security Tests - Attack Vectors", function () {
       await increaseSeconds(100 * DAY); // Alice expired (day ~111), Bob still active
 
       // Second topUp (only pool2 has active stake-days now)
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // Alice's position expired at day 91, so her capDay = 91
@@ -1569,9 +1437,10 @@ describe("Security Tests - Attack Vectors", function () {
         await xanonS.connect(alice).earnReward(alice.address, 1);
       } else {
         // Should fail with NoRewards
-        await expect(
-          xanonS.connect(alice).earnReward(alice.address, 1)
-        ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+        await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+          xanonS,
+          'NoRewards',
+        );
       }
 
       // Bob SHOULD get rewards from second topUp (still active)
@@ -1582,8 +1451,8 @@ describe("Security Tests - Attack Vectors", function () {
     });
   });
 
-  describe("MATHEMATICAL INVARIANTS: Strict Verification", function () {
-    it("INVARIANT: Sum of all claims must equal pool allocations (zero waste)", async function () {
+  describe('MATHEMATICAL INVARIANTS: Strict Verification', function () {
+    it('INVARIANT: Sum of all claims must equal pool allocations (zero waste)', async function () {
       const { owner, alice, bob, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -1599,11 +1468,11 @@ describe("Security Tests - Attack Vectors", function () {
       //
       // This tests that rewards are fully distributed with minimal waste
 
-      await xanonS.connect(alice).mint(ethers.parseEther("1000"), 2);
-      await xanonS.connect(bob).mint(ethers.parseEther("1000"), 2); // Same day
+      await xanonS.connect(alice).mint(ethers.parseEther('1000'), 2);
+      await xanonS.connect(bob).mint(ethers.parseEther('1000'), 2); // Same day
 
       await increaseSeconds(10 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("10000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('10000'));
       await increaseSeconds(DAY);
 
       const alice1 = await anon.balanceOf(alice.address);
@@ -1618,31 +1487,26 @@ describe("Security Tests - Attack Vectors", function () {
       const bobRewards = bob2 - bob1;
       const total = aliceRewards + bobRewards;
 
-      const expectedPoolAllocation = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("10000"),
-        [2]
-      );
+      const expectedPoolAllocation = await getPoolAllocation(xanonS, 2, ethers.parseEther('10000'), [2]);
 
       // Both should get exactly half (equal stake-days)
       expect(aliceRewards).to.be.closeTo(
         expectedPoolAllocation / 2n,
-        ethers.parseEther("1") // Small tolerance
+        ethers.parseEther('1'), // Small tolerance
       );
       expect(bobRewards).to.be.closeTo(
         expectedPoolAllocation / 2n,
-        ethers.parseEther("1") // Small tolerance
+        ethers.parseEther('1'), // Small tolerance
       );
 
       // Total must be very close to pool allocation (minimal waste)
       expect(total).to.be.closeTo(
         expectedPoolAllocation,
-        ethers.parseEther("2") // Small tolerance
+        ethers.parseEther('2'), // Small tolerance
       );
     });
 
-    it("INVARIANT: perDayRate calculation is mathematically sound", async function () {
+    it('INVARIANT: perDayRate calculation is mathematically sound', async function () {
       const { owner, alice, anon, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -1656,9 +1520,9 @@ describe("Security Tests - Attack Vectors", function () {
       //
       // This should be EXACT (no approximation)
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       await increaseSeconds(5 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       const balBefore = await anon.balanceOf(alice.address);
@@ -1667,16 +1531,11 @@ describe("Security Tests - Attack Vectors", function () {
       const rewards = balAfter - balBefore;
 
       // Should be EXACTLY 1000 (pool2 gets 100% due to empty pool redistribution)
-      const expectedReward = await getPoolAllocation(
-        xanonS,
-        2,
-        ethers.parseEther("1000"),
-        [2]
-      );
+      const expectedReward = await getPoolAllocation(xanonS, 2, ethers.parseEther('1000'), [2]);
       expect(rewards).to.equal(expectedReward);
     });
 
-    it("INVARIANT: lastPaidDay tracking prevents double-claims", async function () {
+    it('INVARIANT: lastPaidDay tracking prevents double-claims', async function () {
       const { owner, alice, xanonS } = await deployFixture();
 
       // TIMELINE:
@@ -1696,12 +1555,12 @@ describe("Security Tests - Attack Vectors", function () {
 
       const startDay = await time.latest().then((t) => Math.floor(t / DAY));
 
-      await xanonS.connect(alice).mint(ethers.parseEther("100"), 2);
+      await xanonS.connect(alice).mint(ethers.parseEther('100'), 2);
       const posAfterMint = await xanonS.positionOf(1);
-      const mintDay = Number(posAfterMint.lastPaidDay);
+      const mintDay = Number(posAfterMint[0].lastPaidDay);
 
       await increaseSeconds(5 * DAY);
-      await xanonS.connect(owner).topUp(ethers.parseEther("1000"));
+      await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
       await increaseSeconds(DAY);
 
       // First claim succeeds and updates state
@@ -1711,16 +1570,17 @@ describe("Security Tests - Attack Vectors", function () {
       const pos = await xanonS.positionOf(1);
 
       // lastPaidDay should be >= mintDay (advanced from mint day)
-      expect(Number(pos.lastPaidDay)).to.be.gte(mintDay);
+      expect(Number(pos[0].lastPaidDay)).to.be.gte(mintDay);
 
       // lastPaidDay should be close to snapshot day (T+5 in absolute terms)
       const expectedLastPaidDay = mintDay + 5; // Snapshot was at T+5
-      expect(Number(pos.lastPaidDay)).to.be.closeTo(expectedLastPaidDay, 1);
+      expect(Number(pos[0].lastPaidDay)).to.be.closeTo(expectedLastPaidDay, 1);
 
       // Second immediate claim fails (interval already claimed)
-      await expect(
-        xanonS.connect(alice).earnReward(alice.address, 1)
-      ).to.be.revertedWithCustomError(xanonS, "NoRewards");
+      await expect(xanonS.connect(alice).earnReward(alice.address, 1)).to.be.revertedWithCustomError(
+        xanonS,
+        'NoRewards',
+      );
     });
   });
 });

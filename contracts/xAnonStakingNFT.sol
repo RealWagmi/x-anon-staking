@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
-import {ERC721Enumerable, ERC721} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
+import {
+    ERC721Enumerable,
+    ERC721
+} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import {IxAnonStakingNFT} from "./interfaces/IxAnonStakingNFT.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {INonfungibleTokenPositionDescriptor} from "./interfaces/INonfungibleTokenPositionDescriptor.sol";
+import { IxAnonStakingNFT } from "./interfaces/IxAnonStakingNFT.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { INonfungibleTokenPositionDescriptor } from "./interfaces/INonfungibleTokenPositionDescriptor.sol";
 
 // import "hardhat/console.sol";
 
@@ -37,13 +40,7 @@ error NoActiveStake();
 ///      - Per-pool topUp frequency control (minimum 2 days between topUps per pool)
 ///      - Ring buffer for O(1) expiration tracking
 ///      - Principal protection: contract balance >= totalStaked
-contract xAnonStakingNFT is
-    ERC721Enumerable,
-    IxAnonStakingNFT,
-    Ownable,
-    Pausable,
-    ReentrancyGuard
-{
+contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausable, ReentrancyGuard {
     uint256 private constant PRECISION = 1e18;
     uint256 private constant MAX_DAILY_ROLL = 1000; // Max days to process day-by-day (gas protection)
     uint256 public constant MIN_AMOUNT = 1 ether; // Minimum topUp to prevent DoS (1 ANON tokens)
@@ -192,7 +189,7 @@ contract xAnonStakingNFT is
 
         totalStaked += amount; // Track total principal
         _safeErc20TransferFrom(ANON_TOKEN, msg.sender, amount);
-        emit Mint(msg.sender, tokenId, amount, lockTime);
+        emit Mint(msg.sender, tokenId, pid, amount, lockTime);
     }
 
     /// @notice Burn position NFT and withdraw principal + rewards
@@ -202,10 +199,7 @@ contract xAnonStakingNFT is
     /// @param to Recipient address for principal and rewards
     /// @param tokenId Position NFT ID to burn
     /// @return amount Principal amount returned (rewards sent separately)
-    function burn(
-        address to,
-        uint256 tokenId
-    ) external nonReentrant returns (uint256 amount) {
+    function burn(address to, uint256 tokenId) external nonReentrant returns (uint256 amount) {
         return _burnPosition(to, tokenId, true);
     }
 
@@ -248,7 +242,7 @@ contract xAnonStakingNFT is
 
         // CRITICAL: Verify principal protection AFTER reward payout
         _ensurePrincipalProtection();
-        emit EarnReward(msg.sender, to, tokenId, payout);
+        emit EarnReward(msg.sender, to, tokenId, position.poolId, payout);
 
         return payout;
     }
@@ -280,9 +274,7 @@ contract xAnonStakingNFT is
     ///
     /// @param amount Total ANON tokens to add as rewards
     /// @return bool Always returns true on success
-    function topUp(
-        uint256 amount
-    ) external nonReentrant onlyOwner returns (bool) {
+    function topUp(uint256 amount) external nonReentrant onlyOwner returns (bool) {
         if (amount < MIN_AMOUNT) revert AmountTooSmall();
 
         uint256 today = _currentDay();
@@ -354,9 +346,7 @@ contract xAnonStakingNFT is
     /// @dev Delegates to external descriptor contract for dynamic metadata generation
     /// @param tokenId Position NFT ID
     /// @return uri Base64-encoded JSON metadata URI
-    function tokenURI(
-        uint256 tokenId
-    ) public view override returns (string memory) {
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
         address owner = _ownerOf(tokenId);
         if (owner == address(0)) revert TokenDoesNotExist();
         return
@@ -372,9 +362,7 @@ contract xAnonStakingNFT is
     ///
     /// @param tokenId Position NFT ID
     /// @return pending Estimated reward amount
-    function pendingRewards(
-        uint256 tokenId
-    ) external view returns (uint256 pending) {
+    function pendingRewards(uint256 tokenId) public view returns (uint256 pending) {
         address owner = _ownerOf(tokenId);
         if (owner == address(0)) return 0;
         IxAnonStakingNFT.PositionData memory position = _positions[tokenId];
@@ -476,11 +464,7 @@ contract xAnonStakingNFT is
         // totalStakeDays = 1 token * lockDays
         // reward = totalStakeDays * avgPerDayRate / PRECISION
         // reward = lockDays * avgPerDayRate / PRECISION
-        uint256 rewardPerToken = Math.mulDiv(
-            pool.lockDays * avgPerDayRate,
-            1,
-            PRECISION
-        );
+        uint256 rewardPerToken = Math.mulDiv(pool.lockDays * avgPerDayRate, 1, PRECISION);
 
         // APR = (reward / principal) * (365 / lockDays) * 100
         // APR = reward * 365 / lockDays * 100
@@ -492,9 +476,7 @@ contract xAnonStakingNFT is
         // - More data points = higher confidence
         // - More non-zero rates = higher confidence
         // - Scale: 0-10000 (10000 = 100% confidence)
-        uint256 dataConfidence = samplesToUse >= 10
-            ? 10000
-            : (samplesToUse * 10000) / 10;
+        uint256 dataConfidence = samplesToUse >= 10 ? 10000 : (samplesToUse * 10000) / 10;
         uint256 rateConfidence = countNonZero >= samplesToUse
             ? 10000
             : (countNonZero * 10000) / samplesToUse;
@@ -553,10 +535,11 @@ contract xAnonStakingNFT is
     ///
     /// @param tokenId Position NFT ID
     /// @return position Position data struct
+    /// @return pendingRewards Pending rewards
     function positionOf(
         uint256 tokenId
-    ) external view returns (IxAnonStakingNFT.PositionData memory) {
-        return _positions[tokenId];
+    ) external view returns (IxAnonStakingNFT.PositionData memory, uint256) {
+        return (_positions[tokenId], pendingRewards(tokenId));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -601,18 +584,12 @@ contract xAnonStakingNFT is
     /// @param pid Pool index (0, 1, or 2)
     /// @param allocPoint Allocation points (2000/3000/5000)
     /// @param lockDays Lock period in days (91/182/365)
-    function _addPool(
-        uint256 pid,
-        uint16 allocPoint,
-        uint256 lockDays
-    ) private {
+    function _addPool(uint256 pid, uint16 allocPoint, uint256 lockDays) private {
         Pool storage pool = _pools[pid];
         pool.allocPoint = allocPoint;
         pool.lockDays = lockDays;
         pool.lastUpdatedDay = _currentDay();
-        pool.snapshots.push(
-            RewardSnapshot({day: _currentDay(), perDayRate: 0})
-        );
+        pool.snapshots.push(RewardSnapshot({ day: _currentDay(), perDayRate: 0 }));
         emit PoolAdded(pid, allocPoint, lockDays);
     }
 
@@ -735,7 +712,7 @@ contract xAnonStakingNFT is
 
             if (payout > 0) {
                 _safeErc20Transfer(ANON_TOKEN, to, payout);
-                emit EarnReward(msg.sender, to, tokenId, payout);
+                emit EarnReward(msg.sender, to, tokenId, position.poolId, payout);
             }
         }
         delete _positions[tokenId];
@@ -744,7 +721,7 @@ contract xAnonStakingNFT is
 
         // CRITICAL: Verify principal protection AFTER all transfers
         _ensurePrincipalProtection();
-        emit Burn(msg.sender, to, tokenId, amount);
+        emit Burn(msg.sender, to, tokenId, position.poolId, amount);
     }
 
     /// @dev Compute and collect rewards for a position up to min(nowDay, lockedUntilDay).
@@ -762,19 +739,12 @@ contract xAnonStakingNFT is
         uint256 startDay = position.lastPaidDay;
         if (capDay <= startDay) return 0;
 
-        payout = _earnedDaysInterval(
-            pool.snapshots,
-            startDay,
-            capDay,
-            position.amount
-        );
+        payout = _earnedDaysInterval(pool.snapshots, startDay, capDay, position.amount);
 
         if (payout == 0) return 0;
 
         uint256 coveredDay = pool.snapshots[pool.snapshots.length - 1].day;
-        position.lastPaidDay = uint64(
-            capDay > coveredDay ? coveredDay : capDay
-        );
+        position.lastPaidDay = uint64(capDay > coveredDay ? coveredDay : capDay);
 
         return payout;
     }
@@ -897,9 +867,7 @@ contract xAnonStakingNFT is
             PRECISION,
             pool.poolStakeDays // always > 0
         );
-        pool.snapshots.push(
-            RewardSnapshot({day: snapshotDay, perDayRate: perDay})
-        );
+        pool.snapshots.push(RewardSnapshot({ day: snapshotDay, perDayRate: perDay }));
         pool.poolStakeDays = 0; // Reset for next interval
         return true;
     }
@@ -908,38 +876,19 @@ contract xAnonStakingNFT is
         return a < b ? a : b;
     }
 
-    function _safeErc20Transfer(
-        address token,
-        address to,
-        uint256 value
-    ) private {
+    function _safeErc20Transfer(address token, address to, uint256 value) private {
         if (value == 0) return;
         (bool success, bytes memory data) = token.call(
             abi.encodeWithSelector(IERC20.transfer.selector, to, value)
         );
-        require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "Transfer failed"
-        );
+        require(success && (data.length == 0 || abi.decode(data, (bool))), "Transfer failed");
     }
 
-    function _safeErc20TransferFrom(
-        address token,
-        address from,
-        uint256 amount
-    ) private {
+    function _safeErc20TransferFrom(address token, address from, uint256 amount) private {
         if (amount == 0) return;
         (bool success, bytes memory data) = token.call(
-            abi.encodeWithSelector(
-                IERC20.transferFrom.selector,
-                from,
-                address(this),
-                amount
-            )
+            abi.encodeWithSelector(IERC20.transferFrom.selector, from, address(this), amount)
         );
-        require(
-            success && (data.length == 0 || abi.decode(data, (bool))),
-            "TransferFrom failed"
-        );
+        require(success && (data.length == 0 || abi.decode(data, (bool))), "TransferFrom failed");
     }
 }
