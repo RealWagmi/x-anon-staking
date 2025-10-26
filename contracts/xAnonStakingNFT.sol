@@ -40,7 +40,6 @@ error NoActiveStake();
 ///      - Principal protection: contract balance >= totalStaked
 contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausable, ReentrancyGuard {
     uint256 private constant PRECISION = 1e18;
-    uint256 private constant MAX_DAILY_ROLL = 1000; // Max days to process day-by-day (gas protection)
 
     // Minimum topUp amount: 1 ANON token (dynamically set based on token decimals)
     // CRITICAL: Required if topUp is made public (anyone can add rewards)
@@ -620,8 +619,9 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
     ///      - Used for fair reward distribution: more stake-days = larger share
     ///
     ///      Gas Optimization for Large Gaps:
-    ///      - Small gap (≤1000 days): precise day-by-day iteration
-    ///      - Large gap (>1000 days): approximation (accumulate for active period only, then clear buffers)
+    ///      - gap < lockDays: process all days day-by-day
+    ///      - gap >= lockDays: process only first lockDays days, skip the rest
+    ///        (after lockDays all positions expired, remaining days add nothing)
     ///
     /// @param pool Pool storage reference to update
     function _rollPool(Pool storage pool) internal {
@@ -640,53 +640,30 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         uint256 gap = currDay - lastUpdatedDay;
         uint256 poolStakeDays = pool.poolStakeDays;
 
-        // Emergency (simplified calculation) for very large gaps (> MAX_DAILY_ROLL)
-        if (gap > MAX_DAILY_ROLL) {
-            // Accumulate stake-days only for the active period (up to lockDays from last)
-            // After lockDays, all positions expired → no more stake-days accrue
-            uint256 activeDays = gap < lockDays ? gap : lockDays;
-            poolStakeDays += activeStake * activeDays;
+        // Optimization: if gap >= lockDays, only process lockDays days
+        // After lockDays, all positions expired → activeStake becomes 0
+        // Remaining days (gap - lockDays) contribute nothing
+        uint256 daysToProcess = gap >= lockDays ? lockDays : gap;
 
-            // Clear all expired buckets and update activeStake
-            for (uint256 j = 1; j <= lockDays; j++) {
-                uint256 idx = (lastUpdatedDay + j) % lockDays;
-                uint256 expAmt = pool.dayBuckets[idx];
-                if (expAmt > 0) {
-                    activeStake -= expAmt;
-                    pool.dayBuckets[idx] = 0;
-                }
+        for (uint256 d = 0; d < daysToProcess; d++) {
+            // Accumulate stake-days for this day
+            poolStakeDays += activeStake;
+
+            // Clear expirations for this day
+            uint256 idx = lastUpdatedDay % lockDays;
+            uint256 expired = pool.dayBuckets[idx];
+            if (expired > 0) {
+                activeStake -= expired;
+                pool.dayBuckets[idx] = 0;
             }
 
-            // Write back all updates at once
-            pool.poolStakeDays = poolStakeDays;
-            pool.rollingActiveStake = activeStake;
-            pool.lastUpdatedDay = currDay;
-        } else {
-            // Normal case: process day-by-day for accurate stake-days accounting
-            // CRITICAL PRINCIPLE: Do NOT include currDay (topUp day excluded from period)
-            // Process days from lastUpdatedDay to (currDay-1) inclusive
-            while (lastUpdatedDay < currDay) {
-                // Accumulate stake-days for this day
-                poolStakeDays += activeStake;
-                // Clear expirations for this day
-                uint256 idx = lastUpdatedDay % lockDays;
-                uint256 expired = pool.dayBuckets[idx];
-                if (expired > 0) {
-                    activeStake -= expired;
-                    pool.dayBuckets[idx] = 0;
-                }
-
-                // Increment day
-                lastUpdatedDay++;
-            }
-
-            // Set lastUpdatedDay to currDay (but don't process it)
-            pool.lastUpdatedDay = currDay;
-
-            // Write back all updates at once
-            pool.poolStakeDays = poolStakeDays;
-            pool.rollingActiveStake = activeStake;
+            lastUpdatedDay++;
         }
+
+        // Write back all updates at once
+        pool.poolStakeDays = poolStakeDays;
+        pool.rollingActiveStake = activeStake; // Will be 0 if gap >= lockDays
+        pool.lastUpdatedDay = currDay;
     }
 
     /// @dev Common logic for burning a position and transferring principal.
