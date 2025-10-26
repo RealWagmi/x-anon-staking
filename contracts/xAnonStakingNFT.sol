@@ -3,11 +3,9 @@ pragma solidity ^0.8.23;
 
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
-import {
-    ERC721Enumerable,
-    ERC721
-} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import { ERC721Enumerable, ERC721 } from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import { IxAnonStakingNFT } from "./interfaces/IxAnonStakingNFT.sol";
@@ -43,15 +41,18 @@ error NoActiveStake();
 contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausable, ReentrancyGuard {
     uint256 private constant PRECISION = 1e18;
     uint256 private constant MAX_DAILY_ROLL = 1000; // Max days to process day-by-day (gas protection)
-    uint256 public constant MIN_AMOUNT = 1 ether; // Minimum topUp to prevent DoS (1 ANON tokens)
+
+    // Minimum topUp amount: 1 ANON token (dynamically set based on token decimals)
+    // CRITICAL: Required if topUp is made public (anyone can add rewards)
+    // Without minimum: attacker could spam tiny topUps to create excessive snapshots
+    // With onlyOwner: this is an additional safety layer
+    uint256 public immutable MIN_AMOUNT;
 
     // Fixed pool configuration (3 pools only, immutable)
     uint256 private constant POOL_COUNT = 3;
     uint256 private constant TOTAL_ALLOC_POINT = 10000; // 100% = 10000 basis points (for reference)
 
     // Pool 0: Short (91 days, 20% allocation)
-    // Allocation: 2000/10000 = 20% when all pools active
-    // With empty pool redistribution: gets larger share if other pools empty
     uint16 private constant POOL0_ALLOC = 2000;
     uint256 private constant POOL0_LOCK_DAYS = 91;
 
@@ -131,6 +132,10 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         _tokenDescriptor = tokenDescriptor_;
         ANON_TOKEN = anonToken;
 
+        // Set minimum amount dynamically based on token decimals
+        // This ensures MIN_AMOUNT = 1 full token regardless of decimal precision
+        MIN_AMOUNT = 10 ** IERC20Metadata(anonToken).decimals();
+
         // Initialize three fixed pools (immutable configuration)
         _addPool(0, POOL0_ALLOC, POOL0_LOCK_DAYS); // Pool 0: Short (91 days, 20%)
         _addPool(1, POOL1_ALLOC, POOL1_LOCK_DAYS); // Pool 1: Medium (182 days, 30%)
@@ -153,7 +158,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
     ///      Position starts earning rewards from the day AFTER minting (currentDay + 1).
     ///      This prevents same-block mint + topUp exploits.
     ///
-    /// @param amount Amount of ANON tokens to stake (minimum: MIN_AMOUNT = 1 ether)
+    /// @param amount Amount of ANON tokens to stake (minimum: MIN_AMOUNT = 1 full token)
     /// @param pid Pool ID: 0 (91d), 1 (182d), or 2 (365d)
     /// @return tokenId ID of newly minted NFT position
     function mint(
@@ -268,7 +273,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
     ///      - Allows different pools to receive topUps at different times
     ///
     ///      Restrictions:
-    ///      - Minimum amount: MIN_AMOUNT (1 ANON) to prevent DoS
+    ///      - Minimum amount: MIN_AMOUNT (1 full ANON token) to prevent DoS
     ///      - Only owner can call
     ///      - At least one pool must have active stakes (reverts NoActiveStake otherwise)
     ///
@@ -617,7 +622,6 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
     ///      Gas Optimization for Large Gaps:
     ///      - Small gap (≤1000 days): precise day-by-day iteration
     ///      - Large gap (>1000 days): approximation (accumulate for active period only, then clear buffers)
-    ///      - Tests verify no overpayment occurs with approximation
     ///
     /// @param pool Pool storage reference to update
     function _rollPool(Pool storage pool) internal {
@@ -660,7 +664,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         } else {
             // Normal case: process day-by-day for accurate stake-days accounting
             // CRITICAL PRINCIPLE: Do NOT include currDay (topUp day excluded from period)
-            // Process days from (lastUpdatedDay+1) to (currDay-1) inclusive
+            // Process days from lastUpdatedDay to (currDay-1) inclusive
             while (lastUpdatedDay < currDay) {
                 // Accumulate stake-days for this day
                 poolStakeDays += activeStake;
@@ -672,7 +676,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
                     pool.dayBuckets[idx] = 0;
                 }
 
-                // Increment day first
+                // Increment day
                 lastUpdatedDay++;
             }
 
@@ -687,10 +691,22 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
 
     /// @dev Common logic for burning a position and transferring principal.
     ///      Validates ownership, lock status, and principal protection.
-    ///      Does NOT handle rewards - caller must handle rewards separately.
-    /// @param to Recipient of principal
+    ///
+    ///      Emergency Mode (claimRewards = false):
+    ///      - Does NOT update pool state (_rollPool not called)
+    ///      - Does NOT calculate or pay rewards
+    ///      - Simply returns principal and burns NFT
+    ///      - Unclaimed rewards remain on contract (intended behavior for emergency)
+    ///      - Minimal gas usage, maximum reliability
+    ///
+    ///      Normal Mode (claimRewards = true):
+    ///      - Updates pool state
+    ///      - Calculates and pays all pending rewards
+    ///      - Returns principal and burns NFT
+    ///
+    /// @param to Recipient of principal (and rewards if claimRewards=true)
     /// @param tokenId Position id to burn
-    /// @param claimRewards Whether to claim rewards
+    /// @param claimRewards Whether to claim rewards (false = emergency mode)
     /// @return amount Principal amount returned
     function _burnPosition(
         address to,
@@ -700,13 +716,15 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         _validateTokenOwnership(to, tokenId);
         IxAnonStakingNFT.PositionData storage position = _positions[tokenId];
         if (block.timestamp < position.lockedUntil) revert PositionLocked();
-        Pool storage pool = _pools[position.poolId];
-        _rollPool(pool);
 
         amount = position.amount;
         totalStaked -= amount; // Decrease total principal
 
         if (claimRewards) {
+            // Normal mode: update pool and claim rewards
+            Pool storage pool = _pools[position.poolId];
+            _rollPool(pool);
+
             // Pay any pending rewards up to cap day (lockedUntil)
             uint256 payout = _collectPositionRewards(pool, position);
 
@@ -715,6 +733,8 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
                 emit EarnReward(msg.sender, to, tokenId, position.poolId, payout);
             }
         }
+        // Emergency mode: skip pool update and reward calculation entirely
+
         delete _positions[tokenId];
         _burn(tokenId);
         _safeErc20Transfer(ANON_TOKEN, to, amount);
@@ -793,12 +813,13 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         uint256 prevDay = (i == 0) ? 0 : snaps[i - 1].day;
 
         for (; i < snapsLength; i++) {
-            uint256 endDay = snaps[i].day;
+            RewardSnapshot memory snapshot = snaps[i];
+            uint256 endDay = snapshot.day;
             uint256 start = fromDay > prevDay ? fromDay : prevDay;
             uint256 end = toDay < endDay ? toDay : endDay;
             if (end > start) {
                 uint256 daysOverlap = end - start;
-                uint256 perDay = snaps[i].perDayRate;
+                uint256 perDay = snapshot.perDayRate;
                 uint256 amountPerDay = Math.mulDiv(amount, perDay, PRECISION);
                 total += amountPerDay * daysOverlap;
             }

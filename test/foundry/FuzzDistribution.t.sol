@@ -66,9 +66,6 @@ contract FuzzDistributionTest is Test {
         // Edge case: all active pools have 0 allocPoint (shouldn't happen in practice)
         if (totalActiveAllocPoint == 0) return 0;
 
-        // Get this pool's allocation point
-        (uint16 allocPoint, , , , ) = staking.poolInfo(poolId);
-
         // Calculate proportional share: (topUpAmount * allocPoint / totalActiveAllocPoint)
         // This simulates contract's exact redistribution logic
         uint256 remaining = topUpAmount;
@@ -188,9 +185,7 @@ contract FuzzDistributionTest is Test {
         uint8 maxStakeDays = uint8(lockDays < 50 ? lockDays : 50);
 
         aliceStakeDays = uint8(bound(aliceStakeDays, 2, maxStakeDays));
-        bobStakeDays = uint8(
-            bound(bobStakeDays, 1, aliceStakeDays > 1 ? aliceStakeDays - 1 : 1)
-        );
+        bobStakeDays = uint8(bound(bobStakeDays, 1, aliceStakeDays > 1 ? aliceStakeDays - 1 : 1));
 
         // Alice stakes first
         vm.prank(alice);
@@ -275,11 +270,7 @@ contract FuzzDistributionTest is Test {
         // Calculate expected pool allocation (only this pool is active)
         uint8[] memory activePoolIds = new uint8[](1);
         activePoolIds[0] = poolId;
-        uint256 poolAllocation = getPoolAllocation(
-            poolId,
-            topUpAmount,
-            activePoolIds
-        );
+        uint256 poolAllocation = getPoolAllocation(poolId, topUpAmount, activePoolIds);
 
         // Claim all
         vm.prank(alice);
@@ -292,11 +283,7 @@ contract FuzzDistributionTest is Test {
         uint256 totalDistributed = r1 + r2 + r3;
 
         // CRITICAL INVARIANT: Total cannot exceed pool allocation
-        assertLe(
-            totalDistributed,
-            poolAllocation,
-            "Total rewards exceed pool allocation"
-        );
+        assertLe(totalDistributed, poolAllocation, "Total rewards exceed pool allocation");
 
         // Should distribute most of allocation (>95%)
         assertGe(
@@ -358,11 +345,7 @@ contract FuzzDistributionTest is Test {
             ? aliceTotalRewards - bobRewards
             : bobRewards - aliceTotalRewards;
 
-        assertLt(
-            diff,
-            bobRewards / 1000,
-            "Fragmentation should not affect rewards"
-        );
+        assertLt(diff, bobRewards / 1000, "Fragmentation should not affect rewards");
     }
 
     // ════════════════════════════════════════════════════════════════
@@ -479,11 +462,7 @@ contract FuzzDistributionTest is Test {
         // INVARIANT 3: Total should not exceed pool allocation (only this pool active)
         uint8[] memory activePoolIds = new uint8[](1);
         activePoolIds[0] = poolId;
-        uint256 poolAlloc = getPoolAllocation(
-            poolId,
-            10_000 ether,
-            activePoolIds
-        );
+        uint256 poolAlloc = getPoolAllocation(poolId, 10_000 ether, activePoolIds);
         assertLe(r1 + r2, poolAlloc, "Total <= allocation");
 
         // Note: Complex scenario with gaps and intermediate snapshots
@@ -550,9 +529,7 @@ contract FuzzDistributionTest is Test {
         // Bound inputs
         stakeAmount = uint96(bound(stakeAmount, MIN_AMOUNT, 10_000 ether));
         daysBeforeTopUp = uint16(bound(daysBeforeTopUp, 2, 30));
-        topUpAmount = uint96(
-            bound(topUpAmount, MIN_AMOUNT * 100, 50_000 ether)
-        );
+        topUpAmount = uint96(bound(topUpAmount, MIN_AMOUNT * 100, 50_000 ether));
 
         // Stake in all 3 pools (same amount, same time)
         // This ensures ALL pools are active → no empty pool redistribution
@@ -629,17 +606,9 @@ contract FuzzDistributionTest is Test {
         activePoolIds[1] = 1;
         activePoolIds[2] = 2;
 
-        uint256 expectedAlice = getPoolAllocation(
-            0,
-            topUpAmount,
-            activePoolIds
-        );
+        uint256 expectedAlice = getPoolAllocation(0, topUpAmount, activePoolIds);
         uint256 expectedBob = getPoolAllocation(1, topUpAmount, activePoolIds);
-        uint256 expectedCarol = getPoolAllocation(
-            2,
-            topUpAmount,
-            activePoolIds
-        );
+        uint256 expectedCarol = getPoolAllocation(2, topUpAmount, activePoolIds);
 
         // Claim rewards
         vm.prank(alice);
@@ -650,24 +619,9 @@ contract FuzzDistributionTest is Test {
         uint256 carolRewards = staking.earnReward(carol, tokenId2);
 
         // CRITICAL ASSERTIONS: Verify exact 20%/30%/50% distribution
-        assertApproxEqRel(
-            aliceRewards,
-            expectedAlice,
-            0.01e18,
-            "Alice should get ~20%"
-        );
-        assertApproxEqRel(
-            bobRewards,
-            expectedBob,
-            0.01e18,
-            "Bob should get ~30%"
-        );
-        assertApproxEqRel(
-            carolRewards,
-            expectedCarol,
-            0.01e18,
-            "Carol should get ~50%"
-        );
+        assertApproxEqRel(aliceRewards, expectedAlice, 0.01e18, "Alice should get ~20%");
+        assertApproxEqRel(bobRewards, expectedBob, 0.01e18, "Bob should get ~30%");
+        assertApproxEqRel(carolRewards, expectedCarol, 0.01e18, "Carol should get ~50%");
 
         // Verify total distributed equals topUp amount
         uint256 totalDistributed = aliceRewards + bobRewards + carolRewards;
@@ -735,11 +689,7 @@ contract FuzzDistributionTest is Test {
         // Because other pools are empty, their allocations are redistributed to her pool
         uint8[] memory activePoolIds = new uint8[](1);
         activePoolIds[0] = activePoolId;
-        uint256 expectedRewards = getPoolAllocation(
-            activePoolId,
-            topUpAmount,
-            activePoolIds
-        );
+        uint256 expectedRewards = getPoolAllocation(activePoolId, topUpAmount, activePoolIds);
 
         // Should get close to 100% (within 1% tolerance for rounding)
         assertApproxEqRel(
@@ -752,25 +702,13 @@ contract FuzzDistributionTest is Test {
         // Verify it's actually ~100% of topUp, not base allocation
         if (activePoolId == 0) {
             // Pool 0 base allocation is 20%, but should get ~100%
-            assertGt(
-                rewards,
-                (topUpAmount * 95) / 100,
-                "Pool0 gets >95% (not 20%)"
-            );
+            assertGt(rewards, (topUpAmount * 95) / 100, "Pool0 gets >95% (not 20%)");
         } else if (activePoolId == 1) {
             // Pool 1 base allocation is 30%, but should get ~100%
-            assertGt(
-                rewards,
-                (topUpAmount * 95) / 100,
-                "Pool1 gets >95% (not 30%)"
-            );
+            assertGt(rewards, (topUpAmount * 95) / 100, "Pool1 gets >95% (not 30%)");
         } else {
             // Pool 2 base allocation is 50%, but should get ~100%
-            assertGt(
-                rewards,
-                (topUpAmount * 95) / 100,
-                "Pool2 gets >95% (not 50%)"
-            );
+            assertGt(rewards, (topUpAmount * 95) / 100, "Pool2 gets >95% (not 50%)");
         }
     }
 
@@ -817,11 +755,7 @@ contract FuzzDistributionTest is Test {
         activePoolIds[0] = poolId;
         uint256 expectedTotal = 0;
         for (uint256 i = 0; i < numClaims; i++) {
-            expectedTotal += getPoolAllocation(
-                poolId,
-                1000 ether,
-                activePoolIds
-            );
+            expectedTotal += getPoolAllocation(poolId, 1000 ether, activePoolIds);
         }
 
         // INVARIANT: Sum of claims should equal pool allocations
@@ -898,7 +832,7 @@ contract FuzzDistributionTest is Test {
         uint256 tokenId = staking.mint(amount, poolId);
 
         // Verify state
-        IxAnonStakingNFT.PositionData memory pos = staking.positionOf(tokenId);
+        (IxAnonStakingNFT.PositionData memory pos, ) = staking.positionOf(tokenId);
         assertEq(pos.amount, amount);
         assertEq(pos.poolId, poolId);
         assertEq(staking.totalStaked(), amount);
@@ -1035,18 +969,10 @@ contract FuzzDistributionTest is Test {
         {
             uint8[] memory activePoolIds = new uint8[](1);
             activePoolIds[0] = poolId;
-            uint256 poolAlloc = getPoolAllocation(
-                poolId,
-                topUpAmount,
-                activePoolIds
-            );
+            uint256 poolAlloc = getPoolAllocation(poolId, topUpAmount, activePoolIds);
 
             // INVARIANT 1: Total rewards <= allocation
-            assertLe(
-                a.rewards + b.rewards + c.rewards,
-                poolAlloc,
-                "Total <= allocation"
-            );
+            assertLe(a.rewards + b.rewards + c.rewards, poolAlloc, "Total <= allocation");
 
             // INVARIANT 2: Earlier stakers get >= later (equal stakes)
             if (a.stake == b.stake && b.stake == c.stake) {
@@ -1065,11 +991,7 @@ contract FuzzDistributionTest is Test {
             uint256 returned = staking.burn(alice, a.tokenId);
 
             assertEq(returned, a.stake, "Burn returns principal");
-            assertEq(
-                staking.totalStaked(),
-                totalBefore - a.stake,
-                "totalStaked updated"
-            );
+            assertEq(staking.totalStaked(), totalBefore - a.stake, "totalStaked updated");
         }
     }
 
@@ -1125,11 +1047,7 @@ contract FuzzDistributionTest is Test {
                 staking.topUp(5_000 ether);
 
                 // Get allocation from contract (only this pool active)
-                totalAllocated += getPoolAllocation(
-                    poolId,
-                    5_000 ether,
-                    activePoolIds
-                );
+                totalAllocated += getPoolAllocation(poolId, 5_000 ether, activePoolIds);
                 skip(2 * DAY);
             }
             skip(DAY);
@@ -1243,9 +1161,6 @@ contract FuzzDistributionTest is Test {
 
         // Wait for unlock
         skip(getLockDays(poolId) * DAY);
-
-        // Staggered exit based on exitOrder
-        uint256 totalStake = a.stake + b.stake + c.stake;
 
         if (exitOrder == 0) {
             // Alice exits first
