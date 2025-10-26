@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: '22.13.1'
-          cache: 'yarn'
+          cache: 'npm'
 
       - run: npm install
       - run: npm run lint:fix
