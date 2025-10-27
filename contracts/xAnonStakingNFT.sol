@@ -710,11 +710,12 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         if (block.timestamp < position.lockedUntil) revert PositionLocked();
 
         amount = position.amount;
+        uint256 poolId = position.poolId; //SLOAD
         totalStaked -= amount; // Decrease total principal
-
+        
         if (claimRewards) {
             // Normal mode: update pool and claim rewards
-            Pool storage pool = _pools[position.poolId];
+            Pool storage pool = _pools[poolId];
             _rollPool(pool);
 
             // Pay any pending rewards up to cap day (lockedUntil)
@@ -722,7 +723,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
 
             if (payout > 0) {
                 _safeErc20Transfer(ANON_TOKEN, to, payout);
-                emit EarnReward(msg.sender, to, tokenId, position.poolId, payout);
+                emit EarnReward(msg.sender, to, tokenId, poolId, payout);
             }
         }
         // Emergency mode: skip pool update and reward calculation entirely
@@ -733,7 +734,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
 
         // CRITICAL: Verify principal protection AFTER all transfers
         _ensurePrincipalProtection();
-        emit Burn(msg.sender, to, tokenId, position.poolId, amount);
+        emit Burn(msg.sender, to, tokenId, poolId, amount);
     }
 
     /// @dev Compute and collect rewards for a position up to min(nowDay, lockedUntilDay).
