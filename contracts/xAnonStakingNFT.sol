@@ -712,7 +712,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         amount = position.amount;
         uint256 poolId = position.poolId; //SLOAD
         totalStaked -= amount; // Decrease total principal
-        
+
         if (claimRewards) {
             // Normal mode: update pool and claim rewards
             Pool storage pool = _pools[poolId];
