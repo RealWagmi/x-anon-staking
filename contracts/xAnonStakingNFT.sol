@@ -113,7 +113,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         RewardSnapshot[] snapshots;
     }
 
-    address private immutable _tokenDescriptor;
+    address private _tokenDescriptor;
     address public immutable ANON_TOKEN;
 
     Pool[POOL_COUNT] private _pools;
@@ -129,6 +129,8 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
     /// @dev tokenId => position data
     mapping(uint256 => IxAnonStakingNFT.PositionData) private _positions;
 
+    mapping(address => bool) private _operatorApproved;
+
     /// @notice Initialize contract with ANON token and descriptor
     /// @dev Creates three immutable pools with fixed allocations (20%/30%/50%)
     ///      Pool parameters cannot be changed after deployment
@@ -143,6 +145,8 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         _tokenDescriptor = tokenDescriptor_;
         ANON_TOKEN = anonToken;
 
+        _operatorApproved[msg.sender] = true;
+
         // Set minimum amount dynamically based on token decimals
         // This ensures MIN_AMOUNT = 1 full token regardless of decimal precision
         MIN_AMOUNT = 10 ** IERC20Metadata(anonToken).decimals();
@@ -151,6 +155,11 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         _addPool(0, POOL0_ALLOC, POOL0_LOCK_DAYS); // Pool 0: Short (91 days, 20%)
         _addPool(1, POOL1_ALLOC, POOL1_LOCK_DAYS); // Pool 1: Medium (182 days, 30%)
         _addPool(2, POOL2_ALLOC, POOL2_LOCK_DAYS); // Pool 2: Long (365 days, 50%)
+    }
+
+    modifier onlyOperator() {
+        require(_operatorApproved[msg.sender], "ONA");
+        _;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -290,7 +299,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
     ///
     /// @param amount Total ANON tokens to add as rewards
     /// @return bool Always returns true on success
-    function topUp(uint256 amount) external nonReentrant onlyOwner returns (bool) {
+    function topUp(uint256 amount) external nonReentrant onlyOperator returns (bool) {
         if (amount < MIN_AMOUNT) revert AmountTooSmall();
 
         uint256 today = _currentDay();
@@ -551,6 +560,17 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         return true;
     }
 
+    function setDescriptor(address descriptor) external onlyOwner {
+        if (descriptor == address(0)) revert InvalidDescriptorAddress();
+        _tokenDescriptor = descriptor;
+    }
+
+    function manageOperator(address _target, bool _approved) external onlyOwner {
+        require(_target != address(0), "IA");
+        _operatorApproved[_target] = _approved;
+        emit OperatorApproved(_target, _approved);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //                       INTERNAL FUNCTIONS
     // ═══════════════════════════════════════════════════════════════
@@ -666,11 +686,12 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         if (block.timestamp < position.lockedUntil) revert PositionLocked();
 
         amount = position.amount;
+        uint256 poolId = position.poolId; //SLOAD
         totalStaked -= amount; // Decrease total principal
 
         if (claimRewards) {
             // Normal mode: update pool and claim rewards
-            Pool storage pool = _pools[position.poolId];
+            Pool storage pool = _pools[poolId];
             _rollPool(pool);
 
             // Pay any pending rewards up to cap day (lockedUntil)
@@ -678,7 +699,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
 
             if (payout > 0) {
                 _safeErc20Transfer(ANON_TOKEN, to, payout);
-                emit EarnReward(msg.sender, to, tokenId, position.poolId, payout);
+                emit EarnReward(msg.sender, to, tokenId, poolId, payout);
             }
         }
         // Emergency mode: skip pool update and reward calculation entirely
@@ -689,7 +710,7 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
 
         // CRITICAL: Verify principal protection AFTER all transfers
         _ensurePrincipalProtection();
-        emit Burn(msg.sender, to, tokenId, position.poolId, amount);
+        emit Burn(msg.sender, to, tokenId, poolId, amount);
     }
 
     /// @dev Compute and collect rewards for a position up to min(nowDay, lockedUntilDay).
