@@ -26,16 +26,17 @@ npm run coverage
 ### 🧪 Latest Test Results
 
 > **Status:** ✅ All Tests Passing  
-> **Tests:** 115 passing  
-> **Duration:** 10s  
-> **Updated:** 2025-10-29
+> **Tests:** 116 passing  
+> **Duration:** 8s  
+> **Updated:** 2025-10-31
 
 <details>
 <summary>📋 Test Breakdown</summary>
 
 
-**✅ ✅ CORRECT (empty pool redistribution working as expected)** (2/2 passed)
+**✅ ✅ CORRECT (empty pool redistribution working as expected)** (3/3 passed)
 
+- ✓ Pool 0=46738, Pool 1=69902, Pool 2=136691 → topUp 2952 after 2 days
 - ✓ Debug: Step by step
 - ✓ Analyze poolStakeDays accumulation
 
@@ -201,7 +202,7 @@ npm run coverage
 - ✓ security: reentrancy protection on earnReward + burn
 - ✓ getPoolAPR: calculates correct APR based on historical data
 - ✓ getPoolAPR: returns zero for pools with no activity
-- ✓ getPoolAPR: confidence increases with more snapshots
+- ✓ getPoolAPR: averages all snapshots
 
 </details>
 
@@ -216,29 +217,29 @@ npm run coverage
 ····················|·····················|·············|·············|·············|···············|··············
 |  Contract         ·  Method             ·  Min        ·  Max        ·  Avg        ·  # calls      ·  usd (avg)  │
 ····················|·····················|·············|·············|·············|···············|··············
-|  xAnonStakingNFT  ·  approve            ·      29234  ·      48657  ·      46577  ·          377  ·          -  │
+|  xAnonStakingNFT  ·  approve            ·      29234  ·      48657  ·      46578  ·          381  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
-|  xAnonStakingNFT  ·  burn               ·      87888  ·    1001592  ·     289151  ·           28  ·          -  │
+|  xAnonStakingNFT  ·  burn               ·      87923  ·    1001635  ·     289191  ·           28  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
 |  xAnonStakingNFT  ·  earnReward         ·      71236  ·     322695  ·      81799  ·          273  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
-|  xAnonStakingNFT  ·  emergencyWithdraw  ·          -  ·          -  ·      75775  ·            3  ·          -  │
+|  xAnonStakingNFT  ·  emergencyWithdraw  ·          -  ·          -  ·      75757  ·            3  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
-|  xAnonStakingNFT  ·  mint               ·     217791  ·    1164893  ·     267611  ·          427  ·          -  │
+|  xAnonStakingNFT  ·  mint               ·     217791  ·    1164893  ·     267731  ·          430  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
-|  xAnonStakingNFT  ·  pause              ·          -  ·          -  ·      27781  ·            2  ·          -  │
+|  xAnonStakingNFT  ·  pause              ·          -  ·          -  ·      27759  ·            2  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
 |  xAnonStakingNFT  ·  rescueTokens       ·          -  ·          -  ·      36481  ·            1  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
-|  xAnonStakingNFT  ·  safeTransferFrom   ·          -  ·          -  ·      83968  ·            1  ·          -  │
+|  xAnonStakingNFT  ·  safeTransferFrom   ·          -  ·          -  ·      84012  ·            1  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
-|  xAnonStakingNFT  ·  topUp              ·     126977  ·     664668  ·     169567  ·          164  ·          -  │
+|  xAnonStakingNFT  ·  topUp              ·     126955  ·     664646  ·     170191  ·          165  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
-|  xAnonStakingNFT  ·  unpause            ·          -  ·          -  ·      27774  ·            1  ·          -  │
+|  xAnonStakingNFT  ·  unpause            ·          -  ·          -  ·      27752  ·            1  ·          -  │
 ····················|·····················|·············|·············|·············|···············|··············
 |  Deployments                            ·                                         ·  % of limit   ·             │
 ··········································|·············|·············|·············|···············|··············
-|  xAnonStakingNFT                        ·    3759101  ·    3759125  ·    3759123  ·       12.5 %  ·          -  │
+|  xAnonStakingNFT                        ·    3696145  ·    3696169  ·    3696167  ·       12.3 %  ·          -  │
 ·-----------------------------------------
 ```
 
