@@ -17,10 +17,7 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { Pausable } from "@openzeppelin/contracts/utils/Pausable.sol";
-import {
-    ERC721Enumerable,
-    ERC721
-} from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import { ERC721Enumerable, ERC721 } from "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import { ReentrancyGuard } from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import { IxAnonStakingNFT } from "./interfaces/IxAnonStakingNFT.sol";
@@ -424,83 +421,42 @@ contract xAnonStakingNFT is ERC721Enumerable, IxAnonStakingNFT, Ownable, Pausabl
         );
     }
 
-    /// @notice Calculate projected Annual Percentage Rate (APR) for a pool
-    /// @dev Estimates future APR based on historical reward rates using stake-days model:
+    /// @notice Calculate average APR for a pool based on ALL historical topUps
+    /// @dev Averages perDayRate from all snapshots (excluding init snapshot):
     ///
-    ///      Algorithm:
-    ///      1. Averages perDayRate from last N snapshots (or last snapshot if lookbackPeriod=0)
-    ///      2. Simulates staking 1 token for full lockDays period
-    ///      3. Calculates reward: token * lockDays * avgPerDayRate / PRECISION
-    ///      4. Annualizes: APR = reward * (365 / lockDays) * 100
+    ///      Formula: APR = (avgPerDayRate × 365 × 10000) / PRECISION
+    ///      Where avgPerDayRate = average of all snapshot perDayRates
     ///
     ///      Returns 0 if insufficient data (< 2 snapshots).
     ///
-    ///      WARNING: This is a PROJECTION, not a guarantee. Actual APR varies based on:
-    ///      - Future topUp frequency and amounts
-    ///      - Pool dilution (more stakers = lower APR per staker)
-    ///      - Entry timing within reward intervals (earlier = more rewards)
+    ///      This shows what APR you would get on average if you keep restaking.
+    ///
+    ///      WARNING: This is a PROJECTION based on historical data.
+    ///      Actual APR depends on future topUp frequency, amounts, and pool dilution.
     ///
     /// @param pid Pool ID (0, 1, or 2)
-    /// @param lookbackPeriod Number of recent snapshots to average (0 = last only, 10 = last 10)
-    /// @return apr Projected APR in basis points (10000 = 100.00%, 2500 = 25.00%)
-    /// @return confidence Data quality score (0-10000, higher = more reliable estimate)
-    function getPoolAPR(
-        uint256 pid,
-        uint256 lookbackPeriod
-    ) external view returns (uint256 apr, uint256 confidence) {
+    /// @return apr Average APR in basis points (10000 = 100.00%, 23053 = 230.53%)
+    function getPoolAPR(uint256 pid) external view returns (uint256 apr) {
         Pool storage pool = _pools[pid];
         uint256 snapsLength = pool.snapshots.length;
 
         // Need at least 2 snapshots (first is init with perDayRate=0)
-        if (snapsLength < 2) return (0, 0);
+        if (snapsLength < 2) return 0;
 
-        // Skip init snapshot, start from index 1
-        uint256 startIdx = snapsLength > 1 ? 1 : 0;
-        uint256 dataPoints = snapsLength - startIdx;
-
-        if (dataPoints == 0) return (0, 0);
-
-        // Determine how many snapshots to use
-        uint256 samplesToUse = lookbackPeriod == 0 ? 1 : lookbackPeriod;
-        if (samplesToUse > dataPoints) samplesToUse = dataPoints;
-
-        // Calculate average perDayRate from recent snapshots
+        // Calculate average perDayRate from ALL data snapshots (skip index 0 = init)
         uint256 sumRates = 0;
-        uint256 countNonZero = 0;
-        uint256 startSample = snapsLength - samplesToUse;
 
-        for (uint256 i = startSample; i < snapsLength; i++) {
-            uint256 rate = pool.snapshots[i].perDayRate;
-            sumRates += rate;
-            if (rate > 0) countNonZero++;
+        for (uint256 i = 1; i < snapsLength; i++) {
+            sumRates += pool.snapshots[i].perDayRate;
         }
 
-        if (sumRates == 0) return (0, 0);
+        if (sumRates == 0) return 0;
 
-        uint256 avgPerDayRate = sumRates / samplesToUse;
+        uint256 dataPoints = snapsLength - 1; // Exclude init snapshot
+        uint256 avgPerDayRate = sumRates / dataPoints;
 
-        // Calculate projected rewards for staking 1 token for full lockDays
-        // totalStakeDays = 1 token * lockDays
-        // reward = totalStakeDays * avgPerDayRate / PRECISION
-        // reward = lockDays * avgPerDayRate / PRECISION
-        uint256 rewardPerToken = Math.mulDiv(pool.lockDays * avgPerDayRate, 1, PRECISION);
-
-        // APR = (reward / principal) * (365 / lockDays) * 100
-        // APR = reward * 365 / lockDays * 100
-        // In basis points (10000 = 100%):
-        // APR_bp = reward * 365 * 10000 / lockDays
-        apr = Math.mulDiv(rewardPerToken * 365, 10000, pool.lockDays);
-
-        // Confidence calculation:
-        // - More data points = higher confidence
-        // - More non-zero rates = higher confidence
-        // - Scale: 0-10000 (10000 = 100% confidence)
-        uint256 dataConfidence = samplesToUse >= 10 ? 10000 : (samplesToUse * 10000) / 10;
-        uint256 rateConfidence = countNonZero >= samplesToUse
-            ? 10000
-            : (countNonZero * 10000) / samplesToUse;
-
-        confidence = (dataConfidence + rateConfidence) / 2;
+        // APR = (avgPerDayRate × 365 × 10000) / PRECISION
+        apr = (avgPerDayRate * 365 * 10000) / PRECISION;
     }
 
     /// @notice Get a specific reward snapshot for a pool

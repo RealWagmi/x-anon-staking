@@ -2186,9 +2186,8 @@ describe('xAnonStakingNFT - stake-days weighting', function () {
     const { owner, alice, xanonS } = await deployFixture();
 
     // Initially no APR (no snapshots)
-    const [apr0, conf0] = await xanonS.getPoolAPR(2, 10);
+    const apr0 = await xanonS.getPoolAPR(2);
     expect(apr0).to.equal(0n);
-    expect(conf0).to.equal(0n);
 
     // Alice stakes to activate pool
     await xanonS.connect(alice).mint(ethers.parseEther('1000'), 2);
@@ -2202,7 +2201,7 @@ describe('xAnonStakingNFT - stake-days weighting', function () {
     await increaseSeconds(2 * DAY);
 
     // Check APR after first snapshot
-    const [apr1, conf1] = await xanonS.getPoolAPR(2, 10);
+    const apr1 = await xanonS.getPoolAPR(2);
 
     // With 1000 tokens staked for 2 days:
     // poolStakeDays = 1000 * 2 = 2000
@@ -2213,7 +2212,6 @@ describe('xAnonStakingNFT - stake-days weighting', function () {
 
     // This is expected for very first interval with high rewards and empty pool redistribution!
     expect(apr1).to.be.gt(0n); // Should have some APR
-    expect(conf1).to.be.gt(0n); // Should have some confidence
 
     // Do more topUps to stabilize APR
     for (let i = 0; i < 5; i++) {
@@ -2222,34 +2220,22 @@ describe('xAnonStakingNFT - stake-days weighting', function () {
     }
 
     // Check APR with more data
-    const [apr2, conf2] = await xanonS.getPoolAPR(2, 10);
+    const apr2 = await xanonS.getPoolAPR(2);
 
     // APR should be lower now with more stable data
     expect(apr2).to.be.gt(0n);
     expect(apr2).to.be.lt(apr1); // Should be lower than initial spike
-
-    // Confidence should be higher with more snapshots
-    expect(conf2).to.be.gte(conf1);
-
-    // Test lookbackPeriod = 0 (last snapshot only)
-    const [aprLast] = await xanonS.getPoolAPR(2, 0);
-    expect(aprLast).to.be.gt(0n);
-
-    // Test with different lookback
-    const [apr3] = await xanonS.getPoolAPR(2, 3);
-    expect(apr3).to.be.gt(0n);
   });
 
   it('getPoolAPR: returns zero for pools with no activity', async function () {
     const { xanonS } = await deployFixture();
 
     // Pool 0 has no stakes or topUps
-    const [apr, confidence] = await xanonS.getPoolAPR(0, 10);
+    const apr = await xanonS.getPoolAPR(0);
     expect(apr).to.equal(0n);
-    expect(confidence).to.equal(0n);
   });
 
-  it('getPoolAPR: confidence increases with more snapshots', async function () {
+  it('getPoolAPR: averages all snapshots', async function () {
     const { owner, alice, xanonS } = await deployFixture();
 
     await xanonS.connect(alice).mint(ethers.parseEther('100'), 1);
@@ -2259,7 +2245,7 @@ describe('xAnonStakingNFT - stake-days weighting', function () {
     await xanonS.connect(owner).topUp(ethers.parseEther('1000'));
     await increaseSeconds(2 * DAY);
 
-    const [, conf1] = await xanonS.getPoolAPR(1, 10);
+    const apr1 = await xanonS.getPoolAPR(1);
 
     // More topUps
     for (let i = 0; i < 3; i++) {
@@ -2267,9 +2253,10 @@ describe('xAnonStakingNFT - stake-days weighting', function () {
       await increaseSeconds(2 * DAY);
     }
 
-    const [, conf2] = await xanonS.getPoolAPR(1, 10);
+    const apr2 = await xanonS.getPoolAPR(1);
 
-    // Confidence should increase with more data
-    expect(conf2).to.be.gt(conf1);
+    // APR should change with more data (averaging more snapshots)
+    expect(apr1).to.be.gt(0n);
+    expect(apr2).to.be.gt(0n);
   });
 });
