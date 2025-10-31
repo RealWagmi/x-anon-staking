@@ -27,11 +27,12 @@ npm run coverage
 
 > **Status:** ✅ All Tests Passing  
 > **Tests:** 116 passing  
-> **Duration:** 9s  
+> **Duration:** 10s  
 > **Updated:** 2025-10-31
 
 <details>
 <summary>📋 Test Breakdown</summary>
+
 
 **✅ ✅ CORRECT (empty pool redistribution working as expected)** (3/3 passed)
 
@@ -163,7 +164,7 @@ npm run coverage
 - ✓ pending rewards with very short first interval (1 day) creates valid perDayRate
 - ✓ rollingActiveStake == 0 when threshold triggers: no snapshot created, pending works
 - ✓ extreme gap (2000+ days) uses simplified calculation without gas issues
-- ✓ binary search in \_firstSnapshotAfter handles edge cases correctly
+- ✓ binary search in _firstSnapshotAfter handles edge cases correctly
 - ✓ multiple topUps in consecutive days: no duplicate snapshots with same endDay
 - ✓ large gap with multiple expirations (20+): day-by-day vs approximation accuracy
 - ✓ CRITICAL: yesterday snapshot math - verify no overpayment from dimension mismatch
@@ -174,7 +175,7 @@ npm run coverage
 - ✓ fast-path handles expirations at specific ring buffer positions
 - ✓ pendingRewards for non-existent token returns 0
 - ✓ positionOf for non-existent token returns zeroed struct
-- ✓ \_computeRewards with empty snapshots returns 0
+- ✓ _computeRewards with empty snapshots returns 0
 - ✓ earnReward with zero payout reverts
 - ✓ constructor reverts with zero address for token
 - ✓ constructor reverts with zero address for descriptor
@@ -182,15 +183,15 @@ npm run coverage
 - ✓ unpause() reverts when called by non-owner
 - ✓ rescueTokens() reverts when called by non-owner
 - ✓ getPoolSnapshots returns empty arrays when offset >= length
-- ✓ \_rollPool: gap > MAX_DAILY_ROLL triggers fast-path with cleared rollingActiveStake
+- ✓ _rollPool: gap > MAX_DAILY_ROLL triggers fast-path with cleared rollingActiveStake
 - ✓ math edge case: very small stake with large rewards (precision test)
 - ✓ math edge case: large stake with small rewards (precision test)
-- ✓ \_earnedDaysInterval: capDay < startDay returns 0 (position expired before interval)
-- ✓ \_rollPool: gap equals lockDays exactly (boundary test)
-- ✓ \_rollPool: gap < lockDays (partial expiration boundary)
+- ✓ _earnedDaysInterval: capDay < startDay returns 0 (position expired before interval)
+- ✓ _rollPool: gap equals lockDays exactly (boundary test)
+- ✓ _rollPool: gap < lockDays (partial expiration boundary)
 - ✓ getPoolSnapshots: limit > remaining length returns only available snapshots
 - ✓ multiple stakes in same day: ring buffer accumulates correctly
-- ✓ \_collectPositionRewards: position with lastPaidDay = capDay returns 0
+- ✓ _collectPositionRewards: position with lastPaidDay = capDay returns 0
 - ✓ math: perDayRate calculation with PRECISION scaling
 - ✓ security: multiple positions per user across different pools
 - ✓ edge case: very old expired position (1000+ days) claiming rewards
