@@ -33,7 +33,6 @@ npm run coverage
 <details>
 <summary>📋 Test Breakdown</summary>
 
-
 **✅ ✅ CORRECT (empty pool redistribution working as expected)** (3/3 passed)
 
 - ✓ Pool 0=46738, Pool 1=69902, Pool 2=136691 → topUp 2952 after 2 days
@@ -164,7 +163,7 @@ npm run coverage
 - ✓ pending rewards with very short first interval (1 day) creates valid perDayRate
 - ✓ rollingActiveStake == 0 when threshold triggers: no snapshot created, pending works
 - ✓ extreme gap (2000+ days) uses simplified calculation without gas issues
-- ✓ binary search in _firstSnapshotAfter handles edge cases correctly
+- ✓ binary search in \_firstSnapshotAfter handles edge cases correctly
 - ✓ multiple topUps in consecutive days: no duplicate snapshots with same endDay
 - ✓ large gap with multiple expirations (20+): day-by-day vs approximation accuracy
 - ✓ CRITICAL: yesterday snapshot math - verify no overpayment from dimension mismatch
@@ -175,7 +174,7 @@ npm run coverage
 - ✓ fast-path handles expirations at specific ring buffer positions
 - ✓ pendingRewards for non-existent token returns 0
 - ✓ positionOf for non-existent token returns zeroed struct
-- ✓ _computeRewards with empty snapshots returns 0
+- ✓ \_computeRewards with empty snapshots returns 0
 - ✓ earnReward with zero payout reverts
 - ✓ constructor reverts with zero address for token
 - ✓ constructor reverts with zero address for descriptor
@@ -183,15 +182,15 @@ npm run coverage
 - ✓ unpause() reverts when called by non-owner
 - ✓ rescueTokens() reverts when called by non-owner
 - ✓ getPoolSnapshots returns empty arrays when offset >= length
-- ✓ _rollPool: gap > MAX_DAILY_ROLL triggers fast-path with cleared rollingActiveStake
+- ✓ \_rollPool: gap > MAX_DAILY_ROLL triggers fast-path with cleared rollingActiveStake
 - ✓ math edge case: very small stake with large rewards (precision test)
 - ✓ math edge case: large stake with small rewards (precision test)
-- ✓ _earnedDaysInterval: capDay < startDay returns 0 (position expired before interval)
-- ✓ _rollPool: gap equals lockDays exactly (boundary test)
-- ✓ _rollPool: gap < lockDays (partial expiration boundary)
+- ✓ \_earnedDaysInterval: capDay < startDay returns 0 (position expired before interval)
+- ✓ \_rollPool: gap equals lockDays exactly (boundary test)
+- ✓ \_rollPool: gap < lockDays (partial expiration boundary)
 - ✓ getPoolSnapshots: limit > remaining length returns only available snapshots
 - ✓ multiple stakes in same day: ring buffer accumulates correctly
-- ✓ _collectPositionRewards: position with lastPaidDay = capDay returns 0
+- ✓ \_collectPositionRewards: position with lastPaidDay = capDay returns 0
 - ✓ math: perDayRate calculation with PRECISION scaling
 - ✓ security: multiple positions per user across different pools
 - ✓ edge case: very old expired position (1000+ days) claiming rewards
@@ -344,165 +343,58 @@ Case 2: Only pool 2 active (pools 0 and 1 empty)
 
 ## 📊 APR Calculation
 
-The contract implements **professional APR calculation** for stake-days weighted model.
-
 ### On-Chain APR (View Function)
 
 ```solidity
-// Get projected APR for pool 2 (Long pool, 365 days)
-(uint256 aprBasisPoints, uint256 confidence) = xAnonStaking.getPoolAPR(
-    2,      // poolId
-    10      // lookbackPeriod (avg last 10 snapshots)
-);
+// Get average APR for pool 2 (Long pool, 365 days)
+// Averages ALL historical topUps
+uint256 aprBasisPoints = xAnonStaking.getPoolAPR(2);
 
 // Convert to percentage
-uint256 aprPercent = aprBasisPoints / 100;  // e.g., 2500 bp = 25.00%
-uint256 confidencePercent = confidence / 100; // e.g., 8500 = 85%
+uint256 aprPercent = aprBasisPoints / 100;  // e.g., 23053 bp = 230.53%
 ```
 
-### TypeScript Helper (Advanced Analysis)
+### TypeScript Helper
 
 ```typescript
-import {
-  getPoolAPRMetrics,
-  compareAllPools,
-  formatAPRMetrics,
-} from "./scripts/calculateAPR";
+import { calculatePoolAPR } from './scripts/calculatePoolAPR';
 
-// Analyze specific pool
-const metrics = await getPoolAPRMetrics(contract, 2);
-console.log(formatAPRMetrics(metrics));
-
-/* Output:
-═══════════════════════════════════════════════════════
-  Pool: Long (365d)
-  Lock Period: 365 days
-═══════════════════════════════════════════════════════
-
-📊 APR Metrics:
-  • Instantaneous APR:    28.50%
-  • 7-Day Historical APR:  26.30%
-  • 30-Day Historical APR: 25.10%
-  • Projected APR:         25.80%
-
-💰 Pool State:
-  • Total Value Locked: 1,250,000.00 tokens
-  • Reward Rate:        0.000708 per token-day
-
-📈 Data Quality:
-  • Quality:     Excellent
-  • Confidence:  95%
-  • Snapshots:   45
-═══════════════════════════════════════════════════════
-*/
+// Calculate APR for a pool
+const apr = await calculatePoolAPR(contract, 2);
+console.log(`Pool 2 APR: ${apr.toFixed(2)}%`);
 
 // Compare all pools
-const { pools, recommendation } = await compareAllPools(contract);
-console.log(recommendation);
-
-/* Output:
-🎯 Long pool offers 8.50% premium APR for extended lock period.
-
-🏆 Best APR: Long (365d) with 25.80% projected APR
-*/
+const aprs = await Promise.all([0, 1, 2].map((pid) => calculatePoolAPR(contract, pid)));
+console.log(`Pool 0 (91d):  ${aprs[0].toFixed(2)}%`);
+console.log(`Pool 1 (182d): ${aprs[1].toFixed(2)}%`);
+console.log(`Pool 2 (365d): ${aprs[2].toFixed(2)}%`);
 ```
 
-### CLI Usage
-
-```bash
-# Set contract address
-export CONTRACT_ADDRESS=0x...
-
-# Run APR analysis
-npx hardhat run scripts/calculateAPR.ts --network mainnet
-```
+**Note:** APR is calculated by averaging perDayRate from ALL historical topUps.
 
 ### APR Calculation Formula
 
-For stake-days weighted model:
-
 ```
-1. avgPerDayRate = average of last N snapshots
-2. rewardPerToken = lockDays * avgPerDayRate / PRECISION
-3. APR = (rewardPerToken / 1 token) * (365 / lockDays) * 100%
+APR = (avgPerDayRate × 365 × 10000) / PRECISION / 100
+
+Where:
+- avgPerDayRate = average of all snapshot perDayRates
+- 10000 = basis points (100%)
+- Result in percentage (e.g., 230.53%)
 ```
-
-**Example:**
-
-- Pool: Long (365 days)
-- avgPerDayRate: 0.000708 (from last 10 topUps)
-- rewardPerToken = 365 \* 0.000708 = 0.2584 tokens
-- APR = (0.2584 / 1) _ (365 / 365) _ 100% = **25.84%**
 
 ### Important Notes
 
-⚠️ **APR is a PROJECTION** based on historical data. Actual returns depend on:
+⚠️ **APR is a PROJECTION** - averages ALL historical topUps.
+
+Actual returns depend on:
 
 - Future topUp frequency and amounts
 - Total active stake (dilution effect)
-- Entry timing within reward intervals
-- Early stakers earn more stake-days
 - **Empty pool redistribution**: If other pools are empty, your pool gets larger share
 
-💡 **Empty Pool Redistribution Impact on APR:**
-
-The `getPoolAPR()` function automatically accounts for empty pool redistribution because it reads actual `perDayRate` from snapshots. These snapshots already reflect the redistributed amounts.
-
-Example: If pool 2 received 100% of a topUp (due to pools 0 and 1 being empty), the snapshot's `perDayRate` will be calculated from that full amount, resulting in higher projected APR.
-
-✅ **Confidence Score** indicates data quality:
-
-- 90-100%: Excellent (30+ snapshots)
-- 70-90%: Good (10-30 snapshots)
-- 50-70%: Fair (5-10 snapshots)
-- <50%: Poor (limited data)
-
-### Integration Examples
-
-#### Frontend Dashboard
-
-```typescript
-// Fetch APR for all pools
-const poolsData = await Promise.all(
-  [0, 1, 2].map((pid) => getPoolAPRMetrics(contract, pid))
-);
-
-// Display in UI
-poolsData.forEach((pool) => {
-  console.log(`${pool.poolName}: ${pool.projectedAPR.toFixed(2)}% APR`);
-  console.log(`TVL: $${formatUSD(pool.totalValueLocked)}`);
-  console.log(`Lock: ${pool.lockDays} days\n`);
-});
-```
-
-#### Smart Contract Integration
-
-```solidity
-// Another contract can query APR
-contract YourProtocol {
-    IxAnonStakingNFT public staking;
-
-    function getBestPool() external view returns (uint256 poolId, uint256 apr) {
-        uint256 bestAPR = 0;
-        uint256 bestPool = 0;
-
-        for (uint256 i = 0; i < 3; i++) {
-            (uint256 currentAPR,) = staking.getPoolAPR(i, 10);
-            if (currentAPR > bestAPR) {
-                bestAPR = currentAPR;
-                bestPool = i;
-            }
-        }
-
-        return (bestPool, bestAPR);
-    }
-}
-```
+Example: If pool 2 received 100% of a topUp (due to pools 0 and 1 being empty).
 
 ## License
 
 MIT
-
-## Audit Status
-
-⚠️ **Not audited yet** - Do not use in production without professional security audit.
