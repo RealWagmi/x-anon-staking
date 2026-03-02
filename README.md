@@ -2,6 +2,13 @@
 
 Stake-days weighted NFT staking system with time-locked pools and proportional reward distribution.
 
+## Deployed Contracts
+
+| Chain     | Address | Explorer |
+|----------|---------|----------|
+| **Sonic**   | `0x780aE218A02A20b69aC3Da7Bf80c08A70A330a5e` | [Sonicscan](https://sonicscan.org/address/0x780aE218A02A20b69aC3Da7Bf80c08A70A330a5e) |
+| **Ethereum** | `0xAc25dcA233DdBeE5D343d1358524D81e38000909` | [Etherscan](https://etherscan.io/address/0xAc25dcA233DdBeE5D343d1358524D81e38000909) |
+
 ## Key Features
 
 - **Three Fixed Pools**: 91/182/365 days lock periods with 20%/30%/50% base allocations
